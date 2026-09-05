@@ -34,7 +34,7 @@ function loadRef(file) {
 
 let input;
 try {
-  input = JSON.parse(readFileSync("/dev/stdin", "utf-8"));
+  input = JSON.parse(readFileSync(0, "utf-8"));
 } catch {
   process.stdout.write("{}");
   process.exit(0);

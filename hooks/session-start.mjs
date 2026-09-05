@@ -24,7 +24,7 @@ function loadSkill() {
 }
 
 let input;
-try { input = JSON.parse(readFileSync("/dev/stdin", "utf-8")); }
+try { input = JSON.parse(readFileSync(0, "utf-8")); }
 catch { process.stdout.write("{}"); process.exit(0); }
 resetSession(input);
 

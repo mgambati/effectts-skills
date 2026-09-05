@@ -40,6 +40,8 @@ The checker registers `extensions/effect-context.ts` with a small Pi adapter and
 
 Subprocess tests run the Claude hooks with JSON input. Extension tests invoke registered callbacks, commands and tools through the adapter. They cover installed-version selection, unsupported and missing installs, nested packages, hoisting, symlinks, changed installations, reference routing, aliases, short reads, failed reads, concurrent hook calls and session reset.
 
+Hooks read standard input through file descriptor `0`. Reopening `/dev/stdin` fails with `ENXIO` for Node child-process sockets on Linux, causing valid hook input to fall through to the empty response. The subprocess tests exercise this input path on CI.
+
 Claude's [hook output protocol](https://code.claude.com/docs/en/hooks#json-output) defines `hookEventName` and `additionalContext`. Returning an `env` object does not persist deduplication. Hooks now claim reference files atomically in a temporary directory keyed by session, working directory and supported version. SessionStart resets those claims, including after compaction; SessionEnd removes them. Without session metadata or writable storage, hooks emit context again. Tests set `EFFECT_SESSION_STATE_DIR` to isolated temporary directories. An abrupt host exit can leave small cache files for the operating system's temporary-file cleanup.
 
 Pi deduplicates by reference file, so `services` and `layers` share a claim. Version detection reads the nearest installed `node_modules/effect/package.json` afresh, including hoisted and symlinked installs. It avoids Node's cached resolution after dependency changes. Installations without `node_modules`, such as Yarn PnP, remain unresolved and receive version guidance.
