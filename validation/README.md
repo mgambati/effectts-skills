@@ -53,3 +53,5 @@ Bun entry points compile but do not run under Bun. HTTP tests use local response
 ## Instruction review
 
 [Invocation examples](invocations.md) records a manual review of triggering and reference selection. It includes unrelated libraries, schema alternatives, resource ownership, version mismatches, and skills-only use. These are reasoning checks against the published instructions, not live agent invocation tests.
+
+[Audit evaluations](audit-evaluations.md) records a manual application of the audit skill to four small cases. `audit.test.ts` executes behavior and public-data contracts. `audit-types.test.mjs` compiles an intentionally invalid entry point and an in-memory correction. That entry point stays outside the ordinary successful typecheck; the compiler test requires its specific missing-dependency diagnostic. `skill-links.test.mjs` checks local links and heading targets in both skill entry points. These tests verify the examples and references, not an agent's ability to discover findings or select the audit skill.
