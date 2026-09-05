@@ -16,11 +16,12 @@
 Install:
 
 ```bash
-bun add -D vitest @effect/vitest@beta
+bun add -D --exact vitest@4.1.11 @effect/vitest@4.0.0-rc.112
 ```
 
 Config:
 
+<!-- check: testing-config -->
 ```typescript
 // vitest.config.ts
 import { defineConfig } from "vitest/config"
@@ -44,6 +45,7 @@ export default defineConfig({
 
 Import from `@effect/vitest`, not `vitest`:
 
+<!-- check: testing-basic -->
 ```typescript
 import { describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
@@ -66,8 +68,11 @@ describe("Calculator", () => {
 
 ### it.effect
 
-Most common. Provides TestContext (TestClock, TestRandom). Clock starts at 0:
+Most common. Provides TestClock and a Scope. Clock starts at 0:
 
+Illustrative fragment. Supply processData and import Effect and it/expect.
+
+<!-- fragment: Supply processData and import Effect and it/expect. -->
 ```typescript
 it.effect("processes data", () =>
   Effect.gen(function* () {
@@ -81,7 +86,11 @@ it.effect("processes data", () =>
 
 Uses real system clock. Use when you need actual delays or real time:
 
+<!-- check: testing-live -->
 ```typescript
+import { Clock, Effect } from "effect"
+import { expect, it } from "@effect/vitest"
+
 it.live("real clock", () =>
   Effect.gen(function* () {
     const now = yield* Clock.currentTimeMillis
@@ -94,7 +103,12 @@ it.live("real clock", () =>
 
 Scoping is automatic in v4. The scope closes when the test ends:
 
+<!-- check: testing-scoped -->
 ```typescript
+import { Effect, FileSystem } from "effect"
+import { NodeFileSystem } from "@effect/platform-node"
+import { expect, it } from "@effect/vitest"
+
 it.effect("temp directory cleaned up", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
@@ -110,6 +124,9 @@ it.effect("temp directory cleaned up", () =>
 
 Use `Effect.provide` inline per test:
 
+Illustrative fragment. Supply Database service with query returning Effect<readonly string[]> and the test imports.
+
+<!-- fragment: Supply Database service with query returning Effect<readonly string[]> and the test imports. -->
 ```typescript
 const testDatabase = Layer.succeed(Database, {
   query: (_sql) => Effect.succeed(["mock", "data"]),
@@ -128,13 +145,17 @@ it.effect("queries database", () =>
 
 `it.effect` provides TestClock automatically. Use `TestClock.adjust` to simulate time:
 
+<!-- check: testing-clock -->
 ```typescript
+import { Effect, Fiber } from "effect"
+import { expect, it } from "@effect/vitest"
+
 import { TestClock } from "effect/testing"
 
 it.effect("time-based test", () =>
   Effect.gen(function* () {
     const fiber = yield* Effect.delay(Effect.succeed("done"), "10 seconds").pipe(
-      Effect.forkChild
+      Effect.forkChild()
     )
     yield* TestClock.adjust("10 seconds")
     const result = yield* Fiber.join(fiber)
@@ -145,22 +166,29 @@ it.effect("time-based test", () =>
 
 ## Test Modifiers
 
+Illustrative fragment. Test modifier examples. Replace the sample effects and remove .only before committing a test.
+
+<!-- fragment: Test modifier examples. Replace the sample effects and remove .only before committing a test. -->
 ```typescript
-it.effect.skip("temporarily disabled", () => /* ... */)
-it.effect.only("focus on this", () => /* ... */)
-it.effect.fails("known bug, expected to fail", () => /* ... */)
+it.effect.skip("temporarily disabled", () => Effect.void)
+it.effect.only("focus on this", () => Effect.void)
+it.effect.fails("known bug, expected to fail", () => Effect.fail("expected"))
 ```
 
 ## Logging in Tests
 
 By default, `it.effect` suppresses log output:
 
+<!-- check: testing-logging -->
 ```typescript
+import { Effect, Logger } from "effect"
+import { it } from "@effect/vitest"
+
 // Option 1: provide a logger
 it.effect("with logging", () =>
   Effect.gen(function* () {
     yield* Effect.log("visible")
-  }).pipe(Effect.provide(Logger.pretty))
+  }).pipe(Effect.provide(Logger.layer([Logger.consolePretty()])))
 )
 
 // Option 2: it.live enables logging by default
@@ -177,8 +205,9 @@ Testing the Events service from [services-and-layers.md](services-and-layers.md#
 
 ### Test layers with in-memory state
 
+<!-- check: testing-events -->
 ```typescript
-import { Clock, Effect, Layer, Option, Schema, ServiceMap } from "effect"
+import { Clock, Effect, Layer, Option, Schema, Context } from "effect"
 import { describe, expect, it } from "@effect/vitest"
 
 const UserId = Schema.String.pipe(Schema.brand("UserId"))
@@ -190,29 +219,29 @@ type TicketId = typeof TicketId.Type
 const RegistrationId = Schema.String.pipe(Schema.brand("RegistrationId"))
 type RegistrationId = typeof RegistrationId.Type
 
-class User extends Schema.Class("User")({
+class User extends Schema.Class<User>("User")({
   id: UserId, name: Schema.String, email: Schema.String,
 }) {}
 
-class Registration extends Schema.Class("Registration")({
+class Registration extends Schema.Class<Registration>("Registration")({
   id: RegistrationId, eventId: EventId, userId: UserId,
   ticketId: TicketId, registeredAt: Schema.Date,
 }) {}
 
-class Ticket extends Schema.Class("Ticket")({
+class Ticket extends Schema.Class<Ticket>("Ticket")({
   id: TicketId, eventId: EventId, code: Schema.String,
 }) {}
 
-class Email extends Schema.Class("Email")({
+class Email extends Schema.Class<Email>("Email")({
   to: Schema.String, subject: Schema.String, body: Schema.String,
 }) {}
 
-class UserNotFound extends Schema.TaggedErrorClass("UserNotFound")(
+class UserNotFound extends Schema.TaggedError<UserNotFound>()(
   "UserNotFound", { id: UserId }
 ) {}
 
 // Test layers with mutable in-memory state
-class Users extends ServiceMap.Service<Users, {
+class Users extends Context.Service<Users, {
   readonly create: (user: User) => Effect.Effect<void>
   readonly findById: (id: UserId) => Effect.Effect<User, UserNotFound>
 }>()("@app/Users") {
@@ -228,21 +257,21 @@ class Users extends ServiceMap.Service<Users, {
   })
 }
 
-class Tickets extends ServiceMap.Service<Tickets, {
+class Tickets extends Context.Service<Tickets, {
   readonly issue: (eventId: EventId, userId: UserId) => Effect.Effect<Ticket>
 }>()("@app/Tickets") {
   static readonly testLayer = Layer.sync(Tickets, () => {
     let counter = 0
     const issue = (eventId: EventId, _userId: UserId) =>
       Effect.sync(() => new Ticket({
-        id: TicketId.makeUnsafe(`ticket-${counter++}`),
+        id: TicketId.make(`ticket-${counter++}`),
         eventId, code: `CODE-${counter}`,
       }))
     return { issue }
   })
 }
 
-class Emails extends ServiceMap.Service<Emails, {
+class Emails extends Context.Service<Emails, {
   readonly send: (email: Email) => Effect.Effect<void>
   readonly sent: Effect.Effect<ReadonlyArray<Email>>
 }>()("@app/Emails") {
@@ -257,8 +286,9 @@ class Emails extends ServiceMap.Service<Emails, {
 
 ### The orchestration service
 
+<!-- check: testing-events -->
 ```typescript
-class Events extends ServiceMap.Service<Events, {
+class Events extends Context.Service<Events, {
   readonly register: (eventId: EventId, userId: UserId) => Effect.Effect<Registration, UserNotFound>
 }>()("@app/Events") {
   static readonly layer = Layer.effect(Events, Effect.gen(function* () {
@@ -272,7 +302,7 @@ class Events extends ServiceMap.Service<Events, {
         const ticket = yield* tickets.issue(eventId, userId)
         const now = yield* Clock.currentTimeMillis
         const registration = new Registration({
-          id: RegistrationId.makeUnsafe(crypto.randomUUID()),
+          id: RegistrationId.make(crypto.randomUUID()),
           eventId, userId, ticketId: ticket.id,
           registeredAt: new Date(now),
         })
@@ -291,6 +321,7 @@ class Events extends ServiceMap.Service<Events, {
 
 ### Tests
 
+<!-- check: testing-events -->
 ```typescript
 // provideMerge exposes leaf services for setup/assertions
 const testLayer = Events.layer.pipe(
@@ -306,12 +337,12 @@ describe("Events.register", () => {
       const events = yield* Events
 
       const user = new User({
-        id: UserId.makeUnsafe("user-123"),
+        id: UserId.make("user-123"),
         name: "Alice", email: "alice@example.com",
       })
       yield* users.create(user)
 
-      const eventId = EventId.makeUnsafe("event-789")
+      const eventId = EventId.make("event-789")
       const registration = yield* events.register(eventId, user.id)
 
       expect(registration.eventId).toBe(eventId)
@@ -326,12 +357,12 @@ describe("Events.register", () => {
       const emails = yield* Emails
 
       const user = new User({
-        id: UserId.makeUnsafe("user-456"),
+        id: UserId.make("user-456"),
         name: "Bob", email: "bob@example.com",
       })
       yield* users.create(user)
 
-      yield* events.register(EventId.makeUnsafe("event-789"), user.id)
+      yield* events.register(EventId.make("event-789"), user.id)
 
       const sentEmails = yield* emails.sent
       expect(sentEmails).toHaveLength(1)
@@ -347,6 +378,9 @@ describe("Events.register", () => {
 
 Swap the success/error channels to assert on errors:
 
+Illustrative fragment. Supply MyService, badInput and testLayer and the Effect and test imports.
+
+<!-- fragment: Supply MyService, badInput and testLayer and the Effect and test imports. -->
 ```typescript
 it.effect("rejects invalid input", () =>
   Effect.gen(function* () {
@@ -357,40 +391,36 @@ it.effect("rejects invalid input", () =>
 )
 ```
 
-## Test Isolation with FiberRef
+## Test isolation with Context.Reference
 
-Avoid mutating `process.env` in parallel tests. Use FiberRef for fiber-local overrides:
+Use a reference for a fiber-local override and `Config` for the environment fallback. Providing a reference affects only the wrapped effect and its children. It does not mutate `process.env`.
 
+<!-- check: testing-reference -->
 ```typescript
-import { Effect, FiberRef } from "effect"
+import { Config, Context, Effect } from "effect"
+import { expect, it } from "@effect/vitest"
 
-// In your module
-const ConfigOverride = FiberRef.unsafeMake<string | undefined>(undefined)
-
-const getConfig = Effect.gen(function* () {
-  const override = yield* FiberRef.get(ConfigOverride)
-  if (override !== undefined) return override
-  return process.env.MY_CONFIG ?? "/default/path"
+const ConfigOverride = Context.Reference<string | undefined>("@app/ConfigOverride", {
+  defaultValue: () => undefined,
 })
 
-// In tests: fiber-local, safe for parallel execution
-it.effect("works with custom config", () =>
+const getConfig = Effect.gen(function* () {
+  const override = yield* ConfigOverride
+  if (override !== undefined) return override
+  return yield* Config.string("MY_CONFIG").pipe(Config.withDefault("/default/path"))
+})
+
+it.effect("uses an isolated override", () =>
   Effect.gen(function* () {
-    const result = yield* myEffect
-    expect(result).toBe(expected)
-  }).pipe(
-    Effect.locally(ConfigOverride, "/test/path"), // scoped to this fiber
-    Effect.provide(TestLayer),
-  )
+    const results = yield* Effect.all([
+      getConfig.pipe(Effect.provideService(ConfigOverride, "/first")),
+      getConfig.pipe(Effect.provideService(ConfigOverride, "/second")),
+    ], { concurrency: "unbounded" })
+    expect(results).toEqual(["/first", "/second"])
+    expect(yield* ConfigOverride).toBeUndefined()
+  })
 )
 ```
-
-**Why FiberRef over process.env mutation:**
-- Fiber-local (parallel test safe)
-- Auto-cleanup (no finally block needed)
-- Type-safe
-
-Patterns adapted from [artimath/effect-skills](https://github.com/artimath/effect-skills) (MIT).
 
 ## Running Tests
 

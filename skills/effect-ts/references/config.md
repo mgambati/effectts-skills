@@ -20,18 +20,20 @@ By default, `Config` reads from environment variables. Override with `ConfigProv
 
 ## Basic Usage
 
+<!-- check: config-basic -->
 ```typescript
 import { Config, Effect } from "effect"
 
 const program = Effect.gen(function* () {
   const apiKey = yield* Config.redacted("API_KEY")
   const port = yield* Config.int("PORT")
-  console.log(`Starting on port ${port}`)
+  yield* Effect.log(`Starting on port ${port}`)
 })
 ```
 
 Override the provider:
 
+<!-- check: config-basic -->
 ```typescript
 import { ConfigProvider, Layer } from "effect"
 
@@ -46,10 +48,11 @@ Effect.runPromise(program.pipe(Effect.provide(testConfigLayer)))
 
 **Best practice:** Create a config service with `layer` and `testLayer`:
 
+<!-- check: config-service -->
 ```typescript
-import { Config, Effect, Layer, Redacted, ServiceMap } from "effect"
+import { Config, Effect, Layer, Redacted, Context } from "effect"
 
-class ApiConfig extends ServiceMap.Service<
+export class ApiConfig extends Context.Service<
   ApiConfig,
   {
     readonly apiKey: Redacted.Redacted
@@ -62,10 +65,10 @@ class ApiConfig extends ServiceMap.Service<
     Effect.gen(function* () {
       const apiKey = yield* Config.redacted("API_KEY")
       const baseUrl = yield* Config.string("API_BASE_URL").pipe(
-        Config.orElse(() => Config.succeed("https://api.example.com"))
+        Config.withDefault("https://api.example.com")
       )
       const timeout = yield* Config.int("API_TIMEOUT").pipe(
-        Config.orElse(() => Config.succeed(30000))
+        Config.withDefault(30000)
       )
       return { apiKey, baseUrl, timeout }
     })
@@ -86,10 +89,13 @@ class ApiConfig extends ServiceMap.Service<
 - Config errors caught early at layer composition
 - Type-safe throughout your app
 
-For tests, just `Layer.succeed` with hardcoded values. No need for `ConfigProvider.fromMap`.
+For tests, just `Layer.succeed` with hardcoded values. Use `ConfigProvider.fromUnknown` when testing config parsing itself.
 
 ## Config Primitives
 
+Illustrative fragment. Config constructors; import Config and Schema from effect.
+
+<!-- fragment: Config constructors; import Config and Schema from effect. -->
 ```typescript
 Config.string("MY_VAR")           // string
 Config.number("PORT")             // number
@@ -98,15 +104,18 @@ Config.boolean("DEBUG")           // boolean
 Config.redacted("API_KEY")        // hidden in logs
 Config.url("API_URL")             // URL
 Config.duration("TIMEOUT")        // Duration
-Config.array(Config.string(), "TAGS") // comma-separated array
+Config.schema(Config.Array(Schema.String), "TAGS") // comma-separated array
 ```
 
 ## Defaults and Fallbacks
 
+Illustrative fragment. Generator body using Config from effect.
+
+<!-- fragment: Generator body using Config from effect. -->
 ```typescript
-// With orElse
+// Default only when missing; invalid values still fail
 const port = yield* Config.int("PORT").pipe(
-  Config.orElse(() => Config.succeed(3000))
+  Config.withDefault(3000)
 )
 
 // Optional values (returns Option<string>)
@@ -117,10 +126,11 @@ const optionalKey = yield* Config.option(Config.string("OPTIONAL_KEY"))
 
 Use `Config.schema` for type-safe validation:
 
+<!-- check: config-schema -->
 ```typescript
-import { Config, Schema } from "effect"
+import { Config, Effect, Schema } from "effect"
 
-const Port = Schema.NumberFromString.pipe(
+export const Port = Schema.NumberFromString.pipe(
   Schema.check(Schema.isInt()),
   Schema.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
   Schema.brand("Port")
@@ -137,6 +147,7 @@ const program = Effect.gen(function* () {
 
 ## Config Providers
 
+<!-- check: config-providers -->
 ```typescript
 import { ConfigProvider, Layer } from "effect"
 
@@ -144,7 +155,7 @@ import { ConfigProvider, Layer } from "effect"
 ConfigProvider.layer(ConfigProvider.fromUnknown({ API_KEY: "key", PORT: "3000" }))
 
 // From JSON
-ConfigProvider.layer(ConfigProvider.fromJson({ API_KEY: "key", PORT: 8080 }))
+ConfigProvider.layer(ConfigProvider.fromUnknown({ API_KEY: "key", PORT: 8080 }))
 
 // Prefixed env vars (reads APP_API_KEY, APP_PORT, etc.)
 ConfigProvider.layer(ConfigProvider.fromEnv().pipe(ConfigProvider.nested("APP")))
@@ -154,8 +165,9 @@ ConfigProvider.layer(ConfigProvider.fromEnv().pipe(ConfigProvider.nested("APP"))
 
 Always use `Config.redacted()` for sensitive values:
 
+<!-- check: config-redacted -->
 ```typescript
-import { Config, Redacted } from "effect"
+import { Config, Effect, Redacted } from "effect"
 
 const program = Effect.gen(function* () {
   const apiKey = yield* Config.redacted("API_KEY")
@@ -164,21 +176,24 @@ const program = Effect.gen(function* () {
   const headers = { Authorization: `Bearer ${Redacted.value(apiKey)}` }
 
   // Hidden in logs
-  console.log(apiKey) // Output: <redacted>
+  yield* Effect.log(apiKey) // Output: <redacted>
 })
 ```
 
-Use `Schema.Redacted(Schema.String)` in config schemas:
+Use `Schema.RedactedFromValue(Schema.String)` in config schemas:
 
+Illustrative fragment. Uses Port from schema validation plus Context, Config, Effect, Layer, Redacted and Schema imports.
+
+<!-- fragment: Uses Port from schema validation plus Context, Config, Effect, Layer, Redacted and Schema imports. -->
 ```typescript
-class DatabaseConfig extends ServiceMap.Service<
+class DatabaseConfig extends Context.Service<
   DatabaseConfig,
   { readonly host: string; readonly port: number; readonly password: Redacted.Redacted }
 >()("@app/DatabaseConfig") {
   static readonly layer = Layer.effect(DatabaseConfig, Effect.gen(function* () {
     const host = yield* Config.schema(Schema.String, "DB_HOST")
     const port = yield* Config.schema(Port, "DB_PORT")
-    const password = yield* Config.schema(Schema.Redacted(Schema.String), "DB_PASSWORD")
+    const password = yield* Config.schema(Schema.RedactedFromValue(Schema.String), "DB_PASSWORD")
     return { host, port, password }
   }))
 }

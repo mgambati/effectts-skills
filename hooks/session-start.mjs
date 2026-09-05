@@ -2,22 +2,13 @@
 /**
  * SessionStart hook: detect Effect project and inject core patterns.
  */
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const pluginRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-const cwd = process.env.CLAUDE_CWD || process.cwd();
+import { effectProjectStatus } from "./effect-version.mjs";
 
-function detectEffect() {
-  try {
-    const pkg = JSON.parse(readFileSync(join(cwd, "package.json"), "utf-8"));
-    const deps = { ...pkg.dependencies, ...pkg.devDependencies, ...pkg.peerDependencies };
-    return "effect" in deps || "@effect/platform" in deps || "@effect/cli" in deps;
-  } catch {
-    return false;
-  }
-}
+const pluginRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 function loadSkill() {
   const skillPath = join(pluginRoot, "skills", "effect-ts", "SKILL.md");
@@ -33,8 +24,9 @@ function loadSkill() {
 
 const input = JSON.parse(readFileSync("/dev/stdin", "utf-8"));
 
-if (detectEffect()) {
-  const skill = loadSkill();
+const status = effectProjectStatus(input.cwd || process.env.CLAUDE_CWD || process.cwd());
+if (status.detected) {
+  const skill = status.supported ? loadSkill() : status.message;
   if (skill) {
     const output = {
       hookSpecificOutput: {

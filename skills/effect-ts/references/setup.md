@@ -153,43 +153,10 @@ Additional library settings:
 
 **Rule of thumb:** Build tool compiling your code? Use `preserve` + `bundler`. TypeScript compiling your code? Use `NodeNext`.
 
-## Reference Repositories
+## Source and validation workflow
 
-Local clones for searching real implementations and patterns:
+Follow [version and source lookup](version-compatibility.md) before choosing dependencies or consulting an Effect checkout. Read the consuming package's scripts for its typecheck and test commands.
 
-- **effect-solutions** (best practices): `~/Code/kitlangton/effect-solutions/`
-- **effect monorepo** (all @effect packages): `~/Code/effect-ts/effect/`
+The examples in this skill compile with TypeScript 5.9.3 and strict type checking. For NodeNext ESM, set `"type": "module"` in the owning package and follow Node's relative import extension rules. For bundled code, use the bundler's module settings.
 
-Search examples:
-
-```bash
-# Find ServiceMap usage patterns
-grep -r "ServiceMap.Service" ~/Code/kitlangton/effect-solutions/
-
-# Find Schema patterns in effect source
-grep -r "Schema.Class" ~/Code/effect-ts/effect/packages/effect/src/
-
-# Find test patterns
-grep -r "it.effect" ~/Code/effect-ts/effect/packages/*/test/
-```
-
-## Development Workflow
-
-From the effect monorepo AGENTS.md:
-
-```bash
-pnpm install          # install
-pnpm lint-fix         # lint and format
-pnpm test run <file>  # run tests
-pnpm check            # type checking (pnpm clean if stuck)
-pnpm build            # build
-pnpm docgen           # verify JSDoc examples
-pnpm codegen          # regenerate barrel files (index.ts)
-```
-
-### Testing conventions (from Effect source)
-
-- Use `it.effect` for all Effect-based tests, not `Effect.runSync` with regular `it`
-- Import `{ assert, describe, it }` from `@effect/vitest`
-- Use `assert` methods instead of `expect` from vitest in Effect tests
-- Test files live in `packages/*/test/`
+The language service is optional and is not included in this slice's compatibility guarantee. Verify its installed release supports the consuming Effect and TypeScript versions before installing or patching TypeScript. The configuration and patch commands above describe integration points, not a validated plugin version.

@@ -1,0 +1,15 @@
+{
+  "name": "effect-skill-validation",
+  "private": true,
+  "type": "module",
+  "scripts": { "check": "node check.mjs", "test": "vitest run" },
+  "devDependencies": {
+    "effect": "4.0.0-rc.112",
+    "@effect/platform-node": "4.0.0-rc.112",
+    "@effect/platform-bun": "4.0.0-rc.112",
+    "@effect/vitest": "4.0.0-rc.112",
+    "vitest": "4.1.11",
+    "typescript": "5.9.3",
+    "@types/node": "26.2.0"
+  }
+}

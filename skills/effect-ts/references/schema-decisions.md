@@ -35,8 +35,9 @@ Use Schema.Struct
 
 For DTOs, config objects, state containers:
 
+<!-- check: schema-struct -->
 ```typescript
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 
 const Limits = Schema.Struct({
   steps: Schema.Number,
@@ -44,6 +45,8 @@ const Limits = Schema.Struct({
   bytes: Schema.Number,
 })
 type Limits = typeof Limits.Type
+
+const PrincipalId = Schema.NonEmptyString.pipe(Schema.brand("PrincipalId"))
 
 // Nested
 const Capability = Schema.Struct({
@@ -54,20 +57,26 @@ const Capability = Schema.Struct({
 type Capability = typeof Capability.Type
 
 // With optional + default
-const Config = Schema.Struct({
-  timeout: Schema.optional(Schema.Number, { default: () => 5000 }),
-  retries: Schema.optional(Schema.Number, { default: () => 3 }),
+export const Config = Schema.Struct({
+  timeout: Schema.Number.pipe(Schema.withDecodingDefaultType(Effect.succeed(5000))),
+  retries: Schema.Number.pipe(
+    Schema.withDecodingDefaultType(Effect.succeed(3)),
+    Schema.withConstructorDefault(Effect.succeed(3)),
+  ),
 })
 ```
+
+Decoding defaults fill missing or undefined fields. For constructor defaults, also use `Schema.withConstructorDefault`. These are separate operations in this release.
 
 ## Schema.Class (When Behavior Needed)
 
 Use when the type needs custom equality, hashing, methods, or PrimaryKey:
 
+<!-- check: schema-class -->
 ```typescript
 import { Equal, Hash, Schema } from "effect"
 
-class RunnerAddress extends Schema.Class("RunnerAddress")({
+class RunnerAddress extends Schema.Class<RunnerAddress>("RunnerAddress")({
   host: Schema.NonEmptyString,
   port: Schema.Int,
 }) {
@@ -76,7 +85,7 @@ class RunnerAddress extends Schema.Class("RunnerAddress")({
   }
 
   [Hash.symbol]() {
-    return Hash.cached(this, Hash.string(`${this.host}:${this.port}`))
+    return Hash.string(`${this.host}:${this.port}`)
   }
 
   get endpoint(): string {
@@ -89,18 +98,21 @@ class RunnerAddress extends Schema.Class("RunnerAddress")({
 
 For union variants with automatic `_tag` discrimination:
 
+<!-- check: schema-tagged -->
 ```typescript
 import { Match, Schema } from "effect"
 
-class Appended extends Schema.TaggedClass("Appended")("Appended", {
+const RecordId = Schema.NonEmptyString.pipe(Schema.brand("RecordId"))
+
+class Appended extends Schema.TaggedClass<Appended>()("Appended", {
   recordId: RecordId,
 }) {}
 
-class AlreadyExists extends Schema.TaggedClass("AlreadyExists")("AlreadyExists", {
+class AlreadyExists extends Schema.TaggedClass<AlreadyExists>()("AlreadyExists", {
   recordId: RecordId,
 }) {}
 
-class Quarantined extends Schema.TaggedClass("Quarantined")("Quarantined", {
+class Quarantined extends Schema.TaggedClass<Quarantined>()("Quarantined", {
   reason: Schema.String,
 }) {}
 
@@ -120,21 +132,22 @@ const handle = (result: AppendResult) =>
 
 Don't brand bare `Schema.String`. Add actual validation:
 
+<!-- check: schema-brands -->
 ```typescript
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 
 // BAD: brand without constraints
-const UserId = Schema.String.pipe(Schema.brand("UserId"))
+const UnvalidatedUserId = Schema.String.pipe(Schema.brand("UserId"))
 
 // GOOD: brand with real constraints
-const UserId = Schema.NonEmptyString.pipe(
-  Schema.pattern(/^usr_[a-z0-9]+$/),
+export const UserId = Schema.NonEmptyString.pipe(
+  Schema.check(Schema.isPattern(/^usr_[a-z0-9]+$/)),
   Schema.brand("UserId")
 )
 type UserId = typeof UserId.Type
 
 // GOOD: numeric brand with range
-const Port = Schema.Int.pipe(
+export const Port = Schema.Int.pipe(
   Schema.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
   Schema.brand("Port")
 )
@@ -145,9 +158,12 @@ type Port = typeof Port.Type
 
 ### Interface + Schema to single Schema
 
+Illustrative fragment. Before and after alternatives; supply a CasId schema and type and import Schema.
+
+<!-- fragment: Before and after alternatives; supply a CasId schema and type and import Schema. -->
 ```typescript
 // BEFORE (duplicated)
-interface VaultEntry { readonly casId: CasId; readonly mediaType: string }
+interface LegacyVaultEntry { readonly casId: CasId; readonly mediaType: string }
 const VaultEntrySchema = Schema.Struct({ casId: CasId, mediaType: Schema.String })
 
 // AFTER (single source of truth)
@@ -157,9 +173,12 @@ type VaultEntry = typeof VaultEntry.Type
 
 ### Phantom type to Schema.brand
 
+Illustrative fragment. Before and after alternatives; import Schema and choose one WorkflowId definition.
+
+<!-- fragment: Before and after alternatives; import Schema and choose one WorkflowId definition. -->
 ```typescript
 // BEFORE (compile-time only, no runtime validation)
-type WorkflowId = string & { readonly _tag: "WorkflowId" }
+type LegacyWorkflowId = string & { readonly _tag: "WorkflowId" }
 
 // AFTER (runtime validation)
 const WorkflowId = Schema.NonEmptyString.pipe(Schema.brand("WorkflowId"))
@@ -168,15 +187,18 @@ type WorkflowId = typeof WorkflowId.Type
 
 ### String literal union to TaggedClass
 
+Illustrative fragment. Before and after alternatives; import Schema and choose one Result definition.
+
+<!-- fragment: Before and after alternatives; import Schema and choose one Result definition. -->
 ```typescript
 // BEFORE (no narrowing, no per-variant data)
-interface Result { status: "success" | "failure"; data?: unknown; error?: string }
+interface LegacyResult { status: "success" | "failure"; data?: unknown; error?: string }
 
 // AFTER (proper discrimination)
-class Success extends Schema.TaggedClass("Success")("Success", {
+class Success extends Schema.TaggedClass<Success>()("Success", {
   data: Schema.Unknown,
 }) {}
-class Failure extends Schema.TaggedClass("Failure")("Failure", {
+class Failure extends Schema.TaggedClass<Failure>()("Failure", {
   error: Schema.String,
 }) {}
 const Result = Schema.Union([Success, Failure])
@@ -190,7 +212,7 @@ type Result = typeof Result.Type
 | Schema.Class for simple DTOs | Use Schema.Struct unless needs behavior |
 | String literal union in Struct | Use TaggedClass for variants |
 | Separate interface + schema | Single schema as source of truth |
-| Schema.Class without Equal/Hash | Use Struct instead (no benefit) |
+| Schema.Class without methods | Prefer Struct for plain records |
 | Phantom `& { _tag }` | Use Schema.brand with real constraints |
 | `as Type` casts | Use Schema.decodeUnknown |
-| Bare `Schema.String.pipe(Schema.brand(...))` | Add real constraints: NonEmptyString, pattern() |
+| Bare `Schema.String.pipe(Schema.brand(...))` | Add real constraints: NonEmptyString, check(isPattern(...)) |

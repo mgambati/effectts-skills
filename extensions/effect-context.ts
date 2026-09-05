@@ -1,9 +1,9 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { isToolCallEventType } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { effectProjectStatus, SUPPORTED_EFFECT_VERSION } from "../hooks/effect-version.mjs";
 
 // Reference doc topics and their files
 const TOPICS: Record<string, { file: string; label: string }> = {
@@ -18,12 +18,13 @@ const TOPICS: Record<string, { file: string; label: string }> = {
   config: { file: "config.md", label: "Config" },
   processes: { file: "processes.md", label: "Processes & Scopes" },
   setup: { file: "setup.md", label: "Project Setup" },
+  version: { file: "version-compatibility.md", label: "Version compatibility" },
 };
 
 // Pattern detection for smart injection
 const PATTERNS: Record<string, { match: RegExp[]; topic: string }> = {
   services: {
-    match: [/ServiceMap\.Service/, /Layer\.effect/, /Layer\.sync/, /Layer\.scoped/],
+    match: [/Context\.(Service|Reference)/, /ServiceMap\.Service/, /Layer\.effect/, /Layer\.sync/, /Layer\.scoped/],
     topic: "services",
   },
   schema: {
@@ -43,7 +44,7 @@ const PATTERNS: Record<string, { match: RegExp[]; topic: string }> = {
     topic: "http",
   },
   cli: {
-    match: [/from ["']effect\/unstable\/cli/, /Command\.make/, /Argument\./, /Flag\./],
+    match: [/from ["']effect\/unstable\/cli/, /Argument\./, /Flag\./],
     topic: "cli",
   },
   config: {
@@ -51,7 +52,7 @@ const PATTERNS: Record<string, { match: RegExp[]; topic: string }> = {
     topic: "config",
   },
   processes: {
-    match: [/Scope\.make/, /Scope\.extend/, /Effect\.forkDaemon/, /Effect\.forkScoped/, /Command\.start/],
+    match: [/Scope\.make/, /Scope\.(provide|extend)/, /Effect\.fork(Child|Detach|In|Scoped|Daemon)/, /ChildProcess/, /Command\.start/],
     topic: "processes",
   },
 };
@@ -72,16 +73,6 @@ function loadReference(skillDir: string, topic: string): string | null {
   }
 }
 
-function detectEffectProject(cwd: string): boolean {
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(cwd, "package.json"), "utf-8"));
-    const allDeps = { ...pkg.dependencies, ...pkg.devDependencies, ...pkg.peerDependencies };
-    return "effect" in allDeps || "@effect/platform" in allDeps || "@effect/cli" in allDeps;
-  } catch {
-    return false;
-  }
-}
-
 function detectPatterns(content: string): string[] {
   const detected = new Set<string>();
   for (const [, { match, topic }] of Object.entries(PATTERNS)) {
@@ -97,21 +88,26 @@ function detectPatterns(content: string): string[] {
 
 export default function (pi: ExtensionAPI) {
   const skillDir = getSkillDir(__filename);
+  let sessionCwd = process.cwd();
   let isEffectProject = false;
   const injectedTopics = new Set<string>();
 
   // --- Session start: detect Effect project ---
   pi.on("session_start", async (_event, ctx) => {
-    isEffectProject = detectEffectProject(ctx.cwd);
-    if (isEffectProject) {
-      ctx.ui.setStatus("effect", "Effect v4");
-    }
+    sessionCwd = ctx.cwd;
+    const status = effectProjectStatus(ctx.cwd);
+    isEffectProject = status.supported;
+    injectedTopics.clear();
+    ctx.ui.setStatus("effect", status.detected ? `Effect ${status.version ?? "version unresolved"}` : undefined);
+    if (status.detected && !status.supported) ctx.ui.notify(status.message!, "warning");
   });
 
   // --- Smart context injection on file reads ---
   pi.on("tool_result", async (event, ctx) => {
     if (!isEffectProject) return;
     if (event.toolName !== "read") return;
+    const input = event.input as { path?: string } | undefined;
+    if (input?.path && !effectProjectStatus(path.dirname(path.resolve(ctx.cwd, input.path))).supported) return;
 
     // Get the file content from the result
     const textContent = event.content
@@ -127,7 +123,7 @@ export default function (pi: ExtensionAPI) {
 
     if (newTopics.length === 0) return;
 
-    // Inject up to 2 reference docs per read, max 1 total injection
+    // Suggest one new reference per read.
     const toInject = newTopics.slice(0, 1);
     const hints: string[] = [];
 
@@ -173,7 +169,7 @@ export default function (pi: ExtensionAPI) {
       pi.sendMessage(
         {
           customType: "effect-docs",
-          content: `# Effect Reference: ${meta.label}\n\n${content}`,
+          content: `# Effect Reference: ${meta.label}\n\n${effectProjectStatus(ctx.cwd).message ?? "Resolve the consuming Effect version first."}\n\n${content}`,
           display: true,
         },
         { triggerTurn: false }
@@ -188,6 +184,8 @@ export default function (pi: ExtensionAPI) {
     description: "Generate an Effect service scaffold",
     handler: async (args, ctx) => {
       const name = args?.trim() || "MyService";
+      const status = effectProjectStatus(ctx.cwd);
+      if (!status.supported) { ctx.ui.notify(status.message ?? `Requires Effect ${SUPPORTED_EFFECT_VERSION}`, "warning"); return; }
       const scaffold = generateServiceScaffold(name);
       pi.sendMessage(
         {
@@ -206,6 +204,8 @@ export default function (pi: ExtensionAPI) {
     description: "Generate an Effect test scaffold",
     handler: async (args, ctx) => {
       const name = args?.trim() || "MyService";
+      const status = effectProjectStatus(ctx.cwd);
+      if (!status.supported) { ctx.ui.notify(status.message ?? `Requires Effect ${SUPPORTED_EFFECT_VERSION}`, "warning"); return; }
       const scaffold = generateTestScaffold(name);
       pi.sendMessage(
         {
@@ -224,7 +224,7 @@ export default function (pi: ExtensionAPI) {
     name: "effect_scaffold",
     label: "Effect Scaffold",
     description:
-      "Generate idiomatic Effect v4 boilerplate. Creates service, schema, error, or test scaffolds following effect-solutions best practices.",
+      "Generate idiomatic Effect v4 boilerplate. Creates service, schema, error, or test scaffolds checked against Effect 4.0.0-rc.112. Application-specific implementations remain placeholders.",
     promptSnippet: "Generate Effect v4 boilerplate (service, schema, error, test)",
     parameters: Type.Object({
       type: StringEnum(["service", "schema", "error", "test"] as const, {
@@ -233,6 +233,8 @@ export default function (pi: ExtensionAPI) {
       name: Type.String({ description: "Name for the generated type/service (PascalCase)" }),
     }),
     async execute(_toolCallId, params) {
+      const status = effectProjectStatus(sessionCwd);
+      if (!status.supported) throw new Error(status.message ?? `Requires Effect ${SUPPORTED_EFFECT_VERSION}`);
       let scaffold: string;
       switch (params.type) {
         case "service":
@@ -277,7 +279,7 @@ export default function (pi: ExtensionAPI) {
       }
       injectedTopics.add(params.topic);
       return {
-        content: [{ type: "text", text: content }],
+        content: [{ type: "text", text: `${effectProjectStatus(sessionCwd).message ?? "Resolve the consuming Effect version first."}\n\n${content}` }],
         details: { topic: params.topic, label: TOPICS[params.topic]?.label },
       };
     },
@@ -287,12 +289,13 @@ export default function (pi: ExtensionAPI) {
 // --- Scaffold generators ---
 
 function generateServiceScaffold(name: string): string {
-  return `import { Effect, Layer, Schema, ServiceMap } from "effect"
+  return `// Target: Effect 4.0.0-rc.112. Adapt application-specific placeholders.
+import { Effect, Layer, Schema, Context } from "effect"
 
-const ${name}Id = Schema.String.pipe(Schema.brand("${name}Id"))
+export const ${name}Id = Schema.String.pipe(Schema.brand("${name}Id"))
 type ${name}Id = typeof ${name}Id.Type
 
-class ${name} extends ServiceMap.Service<
+export class ${name} extends Context.Service<
   ${name},
   {
     readonly findById: (id: ${name}Id) => Effect.Effect<unknown>
@@ -333,15 +336,16 @@ class ${name} extends ServiceMap.Service<
 }
 
 function generateSchemaScaffold(name: string): string {
-  return `import { Schema } from "effect"
+  return `// Target: Effect 4.0.0-rc.112. Adapt application-specific placeholders.
+import { Schema } from "effect"
 
-const ${name}Id = Schema.NonEmptyString.pipe(Schema.brand("${name}Id"))
+export const ${name}Id = Schema.NonEmptyString.pipe(Schema.brand("${name}Id"))
 type ${name}Id = typeof ${name}Id.Type
 
-class ${name} extends Schema.Class("${name}")({
+export class ${name} extends Schema.Class<${name}>("${name}")({
   id: ${name}Id,
   name: Schema.String,
-  createdAt: Schema.Date,
+  createdAt: Schema.DateFromString,
 }) {
   get displayName() {
     return this.name
@@ -349,13 +353,14 @@ class ${name} extends Schema.Class("${name}")({
 }
 
 // JSON encoding/decoding
-const ${name}FromJson = Schema.fromJsonString(${name})`;
+export const ${name}FromJson = Schema.fromJsonString(${name})`;
 }
 
 function generateErrorScaffold(name: string): string {
-  return `import { Schema } from "effect"
+  return `// Target: Effect 4.0.0-rc.112. Adapt application-specific placeholders.
+import { Schema } from "effect"
 
-class ${name}NotFoundError extends Schema.TaggedErrorClass("${name}NotFoundError")(
+class ${name}NotFoundError extends Schema.TaggedError<${name}NotFoundError>()(
   "${name}NotFoundError",
   {
     id: Schema.String,
@@ -363,7 +368,7 @@ class ${name}NotFoundError extends Schema.TaggedErrorClass("${name}NotFoundError
   }
 ) {}
 
-class ${name}ValidationError extends Schema.TaggedErrorClass("${name}ValidationError")(
+class ${name}ValidationError extends Schema.TaggedError<${name}ValidationError>()(
   "${name}ValidationError",
   {
     field: Schema.String,
@@ -371,49 +376,49 @@ class ${name}ValidationError extends Schema.TaggedErrorClass("${name}ValidationE
   }
 ) {}
 
-class ${name}Error extends Schema.TaggedErrorClass("${name}Error")(
+class ${name}Error extends Schema.TaggedError<${name}Error>()(
   "${name}Error",
   {
-    cause: Schema.Defect,
+    cause: Schema.Defect(),
   }
 ) {}`;
 }
 
 function generateTestScaffold(name: string): string {
-  return `import { describe, expect, it } from "@effect/vitest"
+  return `// Target: Effect 4.0.0-rc.112. Adapt application-specific placeholders.
+import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
-// import { ${name} } from "../src/${name.toLowerCase()}"
+// import { ${name}, ${name}Id } from "../src/${name.toLowerCase()}"
 
 describe("${name}", () => {
   // const testLayer = ${name}.testLayer
 
-  it.effect("creates an instance", () =>
+  it.effect.skip("creates an instance", () =>
     Effect.gen(function* () {
       // const svc = yield* ${name}
       // const result = yield* svc.create({ name: "test" })
       // expect(result).toBeDefined()
-      expect(true).toBe(true)
+      // Replace with assertions against the service implementation.
     })
     // .pipe(Effect.provide(testLayer))
   )
 
-  it.effect("finds by id", () =>
+  it.effect.skip("finds by id", () =>
     Effect.gen(function* () {
       // const svc = yield* ${name}
       // yield* svc.create({ id: "test-1", name: "Alice" })
-      // const found = yield* svc.findById("test-1")
+      // const found = yield* svc.findById(${name}Id.make("test-1"))
       // expect(found).toBeDefined()
-      expect(true).toBe(true)
+      // Replace with assertions against the service implementation.
     })
     // .pipe(Effect.provide(testLayer))
   )
 
-  it.effect("handles errors", () =>
+  it.effect.skip("handles errors after defining a typed failure", () =>
     Effect.gen(function* () {
       // const svc = yield* ${name}
-      // const error = yield* svc.findById("nonexistent").pipe(Effect.flip)
-      // expect(error._tag).toBe("${name}NotFoundError")
-      expect(true).toBe(true)
+      // Add a failing operation and assert its declared error with Effect.flip.
+      // Replace with assertions against the service implementation.
     })
     // .pipe(Effect.provide(testLayer))
   )

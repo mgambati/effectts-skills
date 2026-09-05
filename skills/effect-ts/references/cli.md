@@ -12,13 +12,14 @@
 ## Installation
 
 ```bash
-bun add effect@beta @effect/platform-bun@beta
+bun add --exact effect@4.0.0-rc.112 @effect/platform-bun@4.0.0-rc.112
 ```
 
-For Node.js, use `@effect/platform-node@beta` instead.
+For Node.js, use `@effect/platform-node@4.0.0-rc.112` instead.
 
 ## Minimal Example
 
+<!-- check: cli-minimal -->
 ```typescript
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import { BunServices, BunRuntime } from "@effect/platform-bun"
@@ -32,22 +33,27 @@ const greet = Command.make("greet", { name, shout }, ({ name, shout }) => {
   return Console.log(shout ? message.toUpperCase() : message)
 })
 
-const cli = Command.run(greet, { name: "greet", version: "1.0.0" })
+const cli = Command.run(greet, { version: "1.0.0" })
 
-cli(process.argv).pipe(
+cli.pipe(
   Effect.provide(BunServices.layer),
   BunRuntime.runMain
 )
 ```
 
+`Command.run` reads arguments from Stdio and returns an Effect. For explicit argument arrays, use `Command.runWith(command, { version })(args)` with only user arguments.
+
 Built-in `--help` and `--version` work automatically. Every command should have `Command.withDescription` for useful help output.
 
 ## Arguments and Flags
 
-**Arguments** are positional. **Flags** are named options. Flags must come before arguments.
+Arguments are positional. Flags are named options. Use `--` when a positional value might otherwise be parsed as an option.
 
 ### Arguments
 
+Illustrative fragment. Uses TaskId from the task manager below.
+
+<!-- fragment: Uses TaskId from the task manager below. -->
 ```typescript
 import { Argument } from "effect/unstable/cli"
 
@@ -61,6 +67,7 @@ Argument.integer("id").pipe(Argument.withSchema(TaskId)) // schema-validated
 
 ### Flags
 
+<!-- check: cli-flags -->
 ```typescript
 import { Flag } from "effect/unstable/cli"
 
@@ -73,6 +80,9 @@ Flag.integer("count").pipe(Flag.withDefault(10))      // integer with default
 
 Add descriptions for help output:
 
+Illustrative fragment. Combinators to apply to an Argument or Flag.
+
+<!-- fragment: Combinators to apply to an Argument or Flag. -->
 ```typescript
 Argument.withDescription("The task description")
 Flag.withDescription("Show all tasks including completed")
@@ -80,6 +90,9 @@ Flag.withDescription("Show all tasks including completed")
 
 ## Subcommands
 
+Illustrative fragment. Uses the task argument and imports from the minimal example.
+
+<!-- fragment: Uses the task argument and imports from the minimal example. -->
 ```typescript
 const add = Command.make("add", { task }, ({ task }) =>
   Console.log(`Adding: ${task}`)
@@ -99,13 +112,14 @@ const app = Command.make("tasks").pipe(
 
 ### Schema
 
+<!-- check: cli-tasks -->
 ```typescript
 import { Array, Option, Schema } from "effect"
 
-const TaskId = Schema.Number.pipe(Schema.brand("TaskId"))
+export const TaskId = Schema.Number.pipe(Schema.brand("TaskId"))
 type TaskId = typeof TaskId.Type
 
-class Task extends Schema.Class("Task")({
+export class Task extends Schema.Class<Task>("Task")({
   id: TaskId,
   text: Schema.NonEmptyString,
   done: Schema.Boolean,
@@ -113,15 +127,15 @@ class Task extends Schema.Class("Task")({
   toggle() { return new Task({ ...this, done: !this.done }) }
 }
 
-class TaskList extends Schema.Class("TaskList")({
+export class TaskList extends Schema.Class<TaskList>("TaskList")({
   tasks: Schema.Array(Task),
 }) {
   static Json = Schema.fromJsonString(TaskList)
   static empty = new TaskList({ tasks: [] })
 
   get nextId(): TaskId {
-    if (this.tasks.length === 0) return TaskId.makeUnsafe(1)
-    return TaskId.makeUnsafe(Math.max(...this.tasks.map((t) => t.id)) + 1)
+    if (this.tasks.length === 0) return TaskId.make(1)
+    return TaskId.make(Math.max(...this.tasks.map((t) => t.id)) + 1)
   }
 
   add(text: string): [TaskList, Task] {
@@ -133,7 +147,7 @@ class TaskList extends Schema.Class("TaskList")({
     const index = this.tasks.findIndex((t) => t.id === id)
     if (index === -1) return [this, Option.none()]
     const updated = this.tasks[index].toggle()
-    const tasks = Array.modify(this.tasks, index, () => updated)
+    const tasks = this.tasks.map((task, i) => i === index ? updated : task)
     return [new TaskList({ tasks }), Option.some(updated)]
   }
 }
@@ -141,14 +155,15 @@ class TaskList extends Schema.Class("TaskList")({
 
 ### Service
 
+<!-- check: cli-tasks -->
 ```typescript
-import { Effect, FileSystem, Layer, ServiceMap } from "effect"
+import { Effect, FileSystem, Layer, PlatformError, Context } from "effect"
 
-class TaskRepo extends ServiceMap.Service<TaskRepo, {
-  readonly list: (all?: boolean) => Effect.Effect<ReadonlyArray<Task>>
-  readonly add: (text: string) => Effect.Effect<Task>
-  readonly toggle: (id: TaskId) => Effect.Effect<Option.Option<Task>>
-  readonly clear: () => Effect.Effect<void>
+export class TaskRepo extends Context.Service<TaskRepo, {
+  readonly list: (all?: boolean) => Effect.Effect<ReadonlyArray<Task>, Schema.SchemaError | PlatformError.PlatformError>
+  readonly add: (text: string) => Effect.Effect<Task, Schema.SchemaError | PlatformError.PlatformError>
+  readonly toggle: (id: TaskId) => Effect.Effect<Option.Option<Task>, Schema.SchemaError | PlatformError.PlatformError>
+  readonly clear: () => Effect.Effect<void, Schema.SchemaError | PlatformError.PlatformError>
 }>()("TaskRepo") {
   static layer = Layer.effect(TaskRepo, Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
@@ -157,7 +172,7 @@ class TaskRepo extends ServiceMap.Service<TaskRepo, {
     const load = Effect.gen(function* () {
       const content = yield* fs.readFileString(path)
       return yield* Schema.decodeEffect(TaskList.Json)(content)
-    }).pipe(Effect.orElseSucceed(() => TaskList.empty))
+    }).pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(TaskList.empty)))
 
     const save = (list: TaskList) => Effect.gen(function* () {
       const json = yield* Schema.encodeEffect(TaskList.Json)(list)
@@ -189,8 +204,11 @@ class TaskRepo extends ServiceMap.Service<TaskRepo, {
 }
 ```
 
+The repository treats a missing file as an empty list. Read, write, and schema failures remain typed errors so corrupt data is not silently replaced.
+
 ### Commands
 
+<!-- check: cli-tasks -->
 ```typescript
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import { Console, Effect, Option } from "effect"
@@ -246,20 +264,25 @@ const app = Command.make("tasks").pipe(
 
 ### Entry point
 
+<!-- check: cli-tasks -->
 ```typescript
 import { BunServices, BunRuntime } from "@effect/platform-bun"
 
-const cli = Command.run(app, { name: "tasks", version: "1.0.0" })
+const cli = Command.run(app, { version: "1.0.0" })
 const mainLayer = Layer.provideMerge(TaskRepo.layer, BunServices.layer)
 
-cli(process.argv).pipe(Effect.provide(mainLayer), BunRuntime.runMain)
+const main = cli.pipe(Effect.provide(mainLayer))
+// At the Bun entry point: BunRuntime.runMain(main)
 ```
 
 ### Version from package.json
 
+Illustrative fragment. Replace the task manager entry point and use the consuming package.json.
+
+<!-- fragment: Replace the task manager entry point and use the consuming package.json. -->
 ```typescript
 import pkg from "./package.json" with { type: "json" }
-const cli = Command.run(app, { name: "tasks", version: pkg.version })
+const cli = Command.run(app, { version: pkg.version })
 ```
 
 Requires `"resolveJsonModule": true` in tsconfig.
@@ -275,6 +298,6 @@ Requires `"resolveJsonModule": true` in tsconfig.
 | Descriptions | `Argument.withDescription`, `Flag.withDescription`, `Command.withDescription` |
 | Schema validation | `Argument.withSchema(BrandedType)` |
 | Subcommands | `Command.withSubcommands([...])` |
-| Run CLI | `Command.run(cmd, { name, version })` |
+| Run CLI | `Command.run(cmd, { version })` |
 | Bun platform | `BunServices.layer` + `BunRuntime.runMain` |
 | Node platform | `NodeServices.layer` + `NodeRuntime.runMain` |

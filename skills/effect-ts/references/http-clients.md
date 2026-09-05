@@ -13,6 +13,7 @@
 
 ## Minimal Example
 
+<!-- check: http-minimal -->
 ```typescript
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { Effect, Schema } from "effect"
@@ -41,6 +42,9 @@ program.pipe(Effect.provide(FetchHttpClient.layer), Effect.runPromise)
 
 ### Headers
 
+Illustrative fragment. Generator body; import Effect and the HTTP modules shown.
+
+<!-- fragment: Generator body; import Effect and the HTTP modules shown. -->
 ```typescript
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 
@@ -55,6 +59,9 @@ Helpers: `setHeader`, `setHeaders`, `bearerToken`, `basicAuth`, `acceptJson`.
 
 ### Query Parameters
 
+Illustrative fragment. Import HttpClientRequest from effect/unstable/http.
+
+<!-- fragment: Import HttpClientRequest from effect/unstable/http. -->
 ```typescript
 const request = HttpClientRequest.get("https://api.github.com/search/repositories").pipe(
   HttpClientRequest.setUrlParam("q", "effect language:typescript"),
@@ -66,6 +73,9 @@ const request = HttpClientRequest.get("https://api.github.com/search/repositorie
 
 Use `HttpClientRequest.schemaBodyJson` (returns an Effect because encoding can fail):
 
+Illustrative fragment. Generator body; provide owner and repo strings and import Schema and HTTP modules.
+
+<!-- fragment: Generator body; provide owner and repo strings and import Schema and HTTP modules. -->
 ```typescript
 const CreateIssue = Schema.Struct({ title: Schema.String, body: Schema.String })
 
@@ -79,6 +89,9 @@ const response = yield* HttpClient.execute(request)
 
 ### Schema-validated JSON body
 
+Illustrative fragment. Generator body; provide the User schema and import the HTTP modules.
+
+<!-- fragment: Generator body; provide the User schema and import the HTTP modules. -->
 ```typescript
 const response = yield* HttpClient.get("https://api.github.com/users/effect-ts")
 const user = yield* HttpClientResponse.schemaBodyJson(User)(response)
@@ -86,6 +99,9 @@ const user = yield* HttpClientResponse.schemaBodyJson(User)(response)
 
 ### Status code matching
 
+Illustrative fragment. Generator body; provide response, User, username and a UserNotFound error constructor.
+
+<!-- fragment: Generator body; provide response, User, username and a UserNotFound error constructor. -->
 ```typescript
 const result = yield* HttpClientResponse.matchStatus(response, {
   "2xx": HttpClientResponse.schemaBodyJson(User),
@@ -96,6 +112,9 @@ const result = yield* HttpClientResponse.matchStatus(response, {
 
 ### Filter 2xx only
 
+Illustrative fragment. Generator body; provide response and User and import the HTTP modules.
+
+<!-- fragment: Generator body; provide response and User and import the HTTP modules. -->
 ```typescript
 yield* HttpClientResponse.filterStatusOk(response) // fails on non-2xx
 const user = yield* HttpClientResponse.schemaBodyJson(User)(response)
@@ -105,8 +124,10 @@ const user = yield* HttpClientResponse.schemaBodyJson(User)(response)
 
 Use `HttpClient.mapRequest` for transformations applied to all requests:
 
+<!-- check: http-middleware -->
 ```typescript
-import { flow } from "effect"
+import { Effect, Layer, flow } from "effect"
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 
 const GitHubClient = Layer.effect(
   HttpClient.HttpClient,
@@ -127,38 +148,49 @@ const GitHubClient = Layer.effect(
 
 ## Error Handling
 
+<!-- check: http-errors -->
 ```typescript
+import { Effect, Schema } from "effect"
+import { HttpClient, HttpClientResponse } from "effect/unstable/http"
+
+const Data = Schema.Struct({ value: Schema.String })
 const program = Effect.gen(function* () {
   const response = yield* HttpClient.get("https://api.example.com/data")
+  yield* HttpClientResponse.filterStatusOk(response)
   return yield* HttpClientResponse.schemaBodyJson(Data)(response)
 }).pipe(
-  Effect.catchTag("RequestError", (e) =>
-    Effect.fail(`Network error: ${e.reason}`)
-  ),
-  Effect.catchTag("ResponseError", (e) =>
-    Effect.fail(`HTTP ${e.response.status}: ${e.reason}`)
-  ),
+  Effect.catchTag("HttpClientError", (error) => {
+    const reason = error.reason
+    if (reason._tag === "StatusCodeError") {
+      return Effect.fail(`HTTP ${reason.response.status}`)
+    }
+    return Effect.fail(`HTTP client failure: ${reason._tag}`)
+  }),
 )
 ```
 
-- `RequestError`: network failures, DNS errors, timeouts
-- `ResponseError`: non-2xx status (with `filterStatusOk`) or body parsing failures
+`HttpClientError` wraps a reason such as `TransportError`, `StatusCodeError`, or `DecodeError`. Inspect `error.reason` or use `Effect.catchReason`. Schema validation adds `Schema.SchemaError` to the error channel. Status filtering is explicit; a successful transport does not imply a 2xx response.
 
 ## Retries
 
 Manual retry with schedule:
 
+Illustrative fragment. Supply program and import Effect and Schedule.
+
+<!-- fragment: Supply program and import Effect and Schedule. -->
 ```typescript
 const withRetry = program.pipe(
-  Effect.retry(Schedule.exponential("100 millis").pipe(
-    Schedule.compose(Schedule.recurs(3))
-  ))
+  Effect.retry(Schedule.max([Schedule.exponential("100 millis"), Schedule.recurs(3)]))
 )
 ```
 
 Built-in transient retry (rate limiting, timeouts, 5xx):
 
+<!-- check: http-retry -->
 ```typescript
+import { Effect, Layer } from "effect"
+import { FetchHttpClient, HttpClient } from "effect/unstable/http"
+
 const ResilientClient = Layer.effect(
   HttpClient.HttpClient,
   Effect.gen(function* () {
@@ -170,33 +202,34 @@ const ResilientClient = Layer.effect(
 
 ## Worked Example: Typed API Service
 
+<!-- check: http-service -->
 ```typescript
-import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
-import { Effect, Layer, Schema, ServiceMap } from "effect"
+import { FetchHttpClient, HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import { Effect, Layer, Schema, Context } from "effect"
 
 const UserId = Schema.Number.pipe(Schema.brand("UserId"))
 type UserId = typeof UserId.Type
 
-class User extends Schema.Class("User")({
+class User extends Schema.Class<User>("User")({
   id: UserId,
   login: Schema.String,
   name: Schema.NullOr(Schema.String),
   public_repos: Schema.Number,
 }) {}
 
-class Repo extends Schema.Class("Repo")({
+class Repo extends Schema.Class<Repo>("Repo")({
   id: Schema.Number,
   name: Schema.String,
   full_name: Schema.String,
   stargazers_count: Schema.Number,
 }) {}
 
-class GitHubApi extends ServiceMap.Service<
+export class GitHubApi extends Context.Service<
   GitHubApi,
   {
-    readonly getUser: (username: string) => Effect.Effect<User>
-    readonly getRepo: (owner: string, repo: string) => Effect.Effect<Repo>
-    readonly listRepos: (username: string) => Effect.Effect<ReadonlyArray<Repo>>
+    readonly getUser: (username: string) => Effect.Effect<User, HttpClientError.HttpClientError | Schema.SchemaError>
+    readonly getRepo: (owner: string, repo: string) => Effect.Effect<Repo, HttpClientError.HttpClientError | Schema.SchemaError>
+    readonly listRepos: (username: string) => Effect.Effect<ReadonlyArray<Repo>, HttpClientError.HttpClientError | Schema.SchemaError>
   }
 >()("GitHubApi") {
   static layer = Layer.effect(
@@ -209,16 +242,19 @@ class GitHubApi extends ServiceMap.Service<
 
       const getUser = Effect.fn("GitHubApi.getUser")(function* (username: string) {
         const response = yield* client.get(`/users/${username}`)
+        yield* HttpClientResponse.filterStatusOk(response)
         return yield* HttpClientResponse.schemaBodyJson(User)(response)
       })
 
       const getRepo = Effect.fn("GitHubApi.getRepo")(function* (owner: string, repo: string) {
         const response = yield* client.get(`/repos/${owner}/${repo}`)
+        yield* HttpClientResponse.filterStatusOk(response)
         return yield* HttpClientResponse.schemaBodyJson(Repo)(response)
       })
 
       const listRepos = Effect.fn("GitHubApi.listRepos")(function* (username: string) {
         const response = yield* client.get(`/users/${username}/repos`)
+        yield* HttpClientResponse.filterStatusOk(response)
         return yield* HttpClientResponse.schemaBodyJson(Schema.Array(Repo))(response)
       })
 
@@ -238,7 +274,8 @@ const program = Effect.gen(function* () {
   console.log(`${repo.full_name}: ${repo.stargazers_count} stars`)
 })
 
-program.pipe(Effect.provide(GitHubApi.live), Effect.runPromise)
+const main = program.pipe(Effect.provide(GitHubApi.live))
+// At the entry point: Effect.runPromise(main)
 ```
 
 ## Quick Reference

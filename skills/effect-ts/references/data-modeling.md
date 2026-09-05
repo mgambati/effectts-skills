@@ -24,17 +24,18 @@ All representable data composes from two primitives:
 
 Use `Schema.Class` for composite data models:
 
+<!-- check: model-user -->
 ```typescript
 import { Schema } from "effect"
 
 const UserId = Schema.String.pipe(Schema.brand("UserId"))
 type UserId = typeof UserId.Type
 
-class User extends Schema.Class("User")({
+export class User extends Schema.Class<User>("User")({
   id: UserId,
   name: Schema.String,
   email: Schema.String,
-  createdAt: Schema.Date,
+  createdAt: Schema.DateFromString,
 }) {
   get displayName() {
     return `${this.name} (${this.email})`
@@ -42,7 +43,7 @@ class User extends Schema.Class("User")({
 }
 
 const user = new User({
-  id: UserId.makeUnsafe("user-123"),
+  id: UserId.make("user-123"),
   name: "Alice",
   email: "alice@example.com",
   createdAt: new Date(),
@@ -53,6 +54,9 @@ const user = new User({
 
 Simple string/number alternatives with `Schema.Literals`:
 
+Illustrative fragment. Import Schema from effect.
+
+<!-- fragment: Import Schema from effect. -->
 ```typescript
 const Status = Schema.Literals(["pending", "active", "completed"])
 type Status = typeof Status.Type // "pending" | "active" | "completed"
@@ -60,14 +64,15 @@ type Status = typeof Status.Type // "pending" | "active" | "completed"
 
 Structured variants with `Schema.TaggedClass` + `Schema.Union`:
 
+<!-- check: model-variants -->
 ```typescript
 import { Match, Schema } from "effect"
 
-class Success extends Schema.TaggedClass("Success")("Success", {
+class Success extends Schema.TaggedClass<Success>()("Success", {
   value: Schema.Number,
 }) {}
 
-class Failure extends Schema.TaggedClass("Failure")("Failure", {
+class Failure extends Schema.TaggedClass<Failure>()("Failure", {
   error: Schema.String,
 }) {}
 
@@ -86,6 +91,7 @@ const renderResult = (result: Result) =>
 
 Brand nearly all primitives with semantic meaning. Not just IDs, but emails, URLs, counts, ports, slugs:
 
+<!-- check: model-brands -->
 ```typescript
 import { Schema } from "effect"
 
@@ -107,8 +113,8 @@ const Port = Schema.Int.pipe(
 type Port = typeof Port.Type
 
 // Usage: impossible to mix types
-const userId = UserId.makeUnsafe("user-123")
-const postId = PostId.makeUnsafe("post-456")
+const userId = UserId.make("user-123")
+const postId = PostId.make("post-456")
 
 function getUser(id: UserId) { /* ... */ }
 // getUser(postId) // Type error: can't pass PostId where UserId expected
@@ -118,10 +124,11 @@ function getUser(id: UserId) { /* ... */ }
 
 Use `Schema.fromJsonString` to combine JSON.parse + schema decoding in one step:
 
+<!-- check: model-json -->
 ```typescript
 import { Effect, Schema } from "effect"
 
-class Move extends Schema.Class("Move")({
+class Move extends Schema.Class<Move>("Move")({
   from: Schema.String,
   to: Schema.String,
 }) {}
@@ -149,21 +156,25 @@ Use the `FromJson` schema (not the base schema) for both decode and encode when 
 | `Schema.Number` | `number` | |
 | `Schema.Int` | `number` | Integer validation |
 | `Schema.Boolean` | `boolean` | |
-| `Schema.Date` | `Date` | Parses from ISO string |
+| `Schema.Date` | `Date` | Accepts a Date object |
+| `Schema.DateFromString` | `Date` | Decodes an ISO string |
 | `Schema.DateTimeUtc` | `DateTime.Utc` | Effect DateTime |
-| `Schema.UUID` | `string` | UUID format validation |
+| `Schema.String.check(Schema.isUUID())` | `string` | UUID format validation |
 | `Schema.NonEmptyString` | `string` | Min length 1 |
 | `Schema.NullOr(S)` | `T \| null` | Nullable |
 | `Schema.Array(S)` | `readonly T[]` | Array of schema |
 | `Schema.Struct({...})` | `{...}` | Object shape |
 | `Schema.Redacted(S)` | `Redacted<T>` | Hidden in logs |
-| `Schema.Defect` | `unknown` | Wraps unknown errors |
+| `Schema.Defect()` | `unknown` | Wraps unknown errors |
 
 ### Validation Combinators
 
+Illustrative fragment. Import Schema from effect.
+
+<!-- fragment: Import Schema from effect. -->
 ```typescript
 // String constraints
-Schema.String.pipe(Schema.minLength(1), Schema.maxLength(255))
+Schema.String.pipe(Schema.check(Schema.isMinLength(1), Schema.isMaxLength(255)))
 
 // Number constraints
 Schema.Number.pipe(
@@ -172,7 +183,7 @@ Schema.Number.pipe(
 )
 
 // Pattern matching
-Schema.String.pipe(Schema.pattern(/^[a-z]+$/))
+Schema.String.pipe(Schema.check(Schema.isPattern(/^[a-z]+$/)))
 
 // Optional fields
 Schema.Struct({

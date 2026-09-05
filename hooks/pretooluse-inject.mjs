@@ -7,18 +7,20 @@ import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { effectProjectStatus } from "./effect-version.mjs";
+
 const pluginRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const refsDir = join(pluginRoot, "skills", "effect-ts", "references");
 
 const PATTERNS = [
-  { match: /ServiceMap\.Service|Layer\.effect|Layer\.sync|Layer\.scoped/, ref: "services-and-layers.md" },
+  { match: /Context\.(Service|Reference)|ServiceMap\.Service|Layer\.effect|Layer\.sync|Layer\.scoped/, ref: "services-and-layers.md" },
   { match: /Schema\.Class|Schema\.TaggedClass|Schema\.Struct\(|Schema\.brand/, ref: "data-modeling.md" },
   { match: /Schema\.TaggedErrorClass|Schema\.TaggedError|Effect\.catchTag/, ref: "error-handling.md" },
   { match: /from ["']@effect\/vitest|it\.effect|it\.layer/, ref: "testing.md" },
   { match: /from ["']effect\/unstable\/http|HttpClient|HttpClientResponse/, ref: "http-clients.md" },
-  { match: /from ["']effect\/unstable\/cli|Command\.make\(|Argument\.|Flag\./, ref: "cli.md" },
+  { match: /from ["']effect\/unstable\/cli|Argument\.|Flag\./, ref: "cli.md" },
   { match: /Config\.redacted|Config\.schema|ConfigProvider/, ref: "config.md" },
-  { match: /Scope\.make|Scope\.extend|Effect\.forkDaemon|Effect\.forkScoped/, ref: "processes.md" },
+  { match: /Scope\.make|Scope\.(provide|extend)|Effect\.fork(Child|Detach|In|Scoped|Daemon)|ChildProcess/, ref: "processes.md" },
 ];
 
 // Track injected refs per session via env
@@ -41,18 +43,23 @@ try {
 }
 
 const toolInput = input.tool_input || {};
-const filePath = toolInput.file_path || toolInput.path || toolInput.command || "";
-
-// Only process .ts/.tsx files
-if (!filePath.match(/\.tsx?$/)) {
+const filePath = toolInput.file_path || toolInput.path || "";
+if (typeof filePath !== "string" || !filePath.match(/\.tsx?$/)) {
   process.stdout.write("{}");
+  process.exit(0);
+}
+const fullPath = filePath.startsWith("/") ? filePath : join(input.cwd || process.cwd(), filePath);
+const status = effectProjectStatus(dirname(fullPath));
+if (!status.supported) {
+  process.stdout.write(status.detected
+    ? JSON.stringify({ hookSpecificOutput: { additionalContext: status.message } })
+    : "{}");
   process.exit(0);
 }
 
 // Try to read the file content to detect patterns
 let content = "";
 try {
-  const fullPath = filePath.startsWith("/") ? filePath : join(input.cwd || process.cwd(), filePath);
   if (existsSync(fullPath)) {
     content = readFileSync(fullPath, "utf-8");
   }

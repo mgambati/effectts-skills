@@ -1,6 +1,8 @@
-# ⚡ Effect-TS Plugin for Pi
+# Effect-TS plugin for Pi
 
-Comprehensive [Effect](https://effect.website) v4 skills and smart context injection for [pi](https://github.com/badlogic/pi-mono). Detects Effect projects, injects relevant patterns when you're reading Effect code, and provides scaffold tools and slash commands.
+[Effect](https://effect.website) v4 skills and context injection for [pi](https://github.com/badlogic/pi-mono). Detects Effect projects, injects relevant patterns when you're reading Effect code, and provides scaffold tools and slash commands.
+
+Supported release: **Effect 4.0.0-rc.112**. See [version compatibility and official sources](skills/effect-ts/references/version-compatibility.md) and [validation](validation/README.md). Other releases require matching documentation and API checks before using these patterns.
 
 ## Install
 
@@ -19,11 +21,13 @@ npx skills add joelhooks/effectts-skills
 
 ### Smart Context Injection
 
-The extension detects when you're working in an Effect project (scans `package.json` for `effect` dependency) and automatically:
+The extension resolves the consuming package's installed Effect version and:
 
-- Shows "Effect v4" in the status bar
+- Shows the resolved installed Effect version in the status bar
 - Detects Effect patterns in files you read (services, schemas, errors, testing, HTTP, CLI, etc.)
-- Appends hints about which reference docs are relevant
+- Appends reference hints for the supported release
+- Routes v3, unsupported releases, and unresolved installations to version guidance
+- Generates scaffolds only when the installed Effect version matches the supported release
 
 ### Commands
 
@@ -33,7 +37,7 @@ The extension detects when you're working in an Effect project (scans `package.j
 | `/effect:service <Name>` | Generate a service scaffold with layer and test layer |
 | `/effect:test <Name>` | Generate a test scaffold with @effect/vitest |
 
-**Available topics:** services, layers, data-modeling, schema, errors, testing, http, cli, config, processes, setup
+**Available topics:** services, layers, data-modeling, schema, errors, testing, http, cli, config, processes, setup, version
 
 ### Tools (LLM-callable)
 
@@ -48,25 +52,26 @@ The full `effect-ts` skill with progressive disclosure:
 
 | Reference | Topics |
 |-----------|--------|
-| `SKILL.md` | Core patterns: ServiceMap.Service, Effect.fn/gen, Schema.Class, TaggedErrorClass, Layer composition |
+| `SKILL.md` | Core patterns: Context.Service, Effect.fn/gen, Schema.Class, TaggedError, Layer composition |
 | `services-and-layers.md` | Service-driven development, test layers, memoization, provide vs provideMerge |
 | `data-modeling.md` | Schema.Class, branded types, variants, Match.valueTags, JSON encoding |
 | `schema-decisions.md` | Class vs Struct vs TaggedClass decision flowchart, migration patterns |
-| `error-handling.md` | TaggedErrorClass, yieldable errors, catch/catchTag/catchTags, TypeId/refail |
-| `testing.md` | @effect/vitest, it.effect/live/layer, TestClock, FiberRef isolation, worked example |
+| `error-handling.md` | TaggedError, yieldable errors, catch/catchTag/catchTags, TypeId/refail |
+| `testing.md` | @effect/vitest, it.effect/live/layer, TestClock, Context.Reference overrides, worked example |
 | `http-clients.md` | effect/unstable/http, requests, responses, middleware, retries, typed API service |
 | `cli.md` | effect/unstable/cli, Arguments, Flags, subcommands, task manager example |
 | `config.md` | Config service pattern, schema validation, ConfigProvider, Redacted secrets |
-| `processes.md` | Fork types, Scope.extend, Command for child processes, killable tasks |
+| `processes.md` | Fork types, Scope.provide, ChildProcess and ChildProcessSpawner, killable tasks |
+| `version-compatibility.md` | Installed version detection, matching source and docs, supported dependency set |
 | `setup.md` | tsconfig, Effect Language Service, module settings, dev workflow |
 
 ## Sources
 
-Built from three excellent repos:
+The original patterns came from these repositories. The compatibility pass verifies APIs against the official pinned source linked above:
 
-- **[kitlangton/effect-solutions](https://github.com/kitlangton/effect-solutions)** - Effect best practices by [Kit Langton](https://github.com/kitlangton). Primary source for v4 patterns. Also at [effect.solutions](https://effect.solutions).
-- **[effect-ts/effect](https://github.com/effect-ts/effect)** - The canonical Effect monorepo.
-- **[artimath/effect-skills](https://github.com/artimath/effect-skills)** (MIT) - Schema decision matrix, process/scope patterns, layer gotchas, TypeId/refail, FiberRef isolation.
+- **[kitlangton/effect-solutions](https://github.com/kitlangton/effect-solutions)** - Effect best practices by [Kit Langton](https://github.com/kitlangton). Background patterns. Also at [effect.solutions](https://effect.solutions).
+- **[effect-ts/effect](https://github.com/effect-ts/effect)** - Official Effect source.
+- **[artimath/effect-skills](https://github.com/artimath/effect-skills)** (MIT) - Schema decision matrix, process/scope patterns, layer gotchas, TypeId/refail, Context.Reference overrides.
 
 ## License
 
