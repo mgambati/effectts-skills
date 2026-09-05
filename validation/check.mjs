@@ -1,15 +1,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
-import vm from 'node:vm';
+import { extension } from './extension-host.mjs';
+import { extractExamples, mergeBlocks } from './markdown.mjs';
 import { fixtures } from './fragments.mjs';
 import { SUPPORTED_EFFECT_VERSION } from '../hooks/effect-version.mjs';
 import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
 const dependencies = JSON.parse(fs.readFileSync(path.join(here, 'package.json'), 'utf8')).devDependencies;
-for (const name of ['effect', '@effect/platform-node', '@effect/platform-bun', '@effect/vitest']) {
-  if (dependencies[name] !== SUPPORTED_EFFECT_VERSION) throw new Error(`Unpinned or mismatched dependency: ${name}`);
+for (const name of Object.keys(dependencies)) {
+  if (!/^\d+\.\d+\.\d+(?:-[a-z0-9.]+)?$/.test(dependencies[name])) throw new Error(`Dependency must be exact: ${name}`);
+  if (name === 'effect' || name.startsWith('@effect/')) {
+    if (dependencies[name] !== SUPPORTED_EFFECT_VERSION) throw new Error(`Unpinned or mismatched dependency: ${name}`);
+  }
   const installed = JSON.parse(fs.readFileSync(path.join(here, 'node_modules', name, 'package.json'), 'utf8')).version;
   if (installed !== dependencies[name]) throw new Error(`Installed version mismatch: ${name}`);
 }
@@ -17,22 +21,31 @@ const generated = path.join(here, 'generated');
 fs.rmSync(generated, { recursive: true, force: true });
 fs.mkdirSync(generated, { recursive: true });
 const skill = path.join(root, 'skills/effect-ts');
-const files = [path.join(skill, 'SKILL.md'), ...fs.readdirSync(path.join(skill, 'references')).filter(x => x.endsWith('.md')).map(x => path.join(skill, 'references', x))];
+const files = fs.readdirSync(skill, { recursive: true }).filter(x => x.endsWith('.md')).sort().map(x => path.join(skill, x));
 const groups = new Map();
 const inventory = [];
+const usedFixtures = new Set();
+const groupOwners = new Map();
+const grouped = { 'cli-tasks': 4, 'config-basic': 2, 'testing-events': 3 };
+const extensions = new Map();
 for (const file of files) {
   const source = fs.readFileSync(file, 'utf8');
   let count = 0;
-  for (const match of source.matchAll(/(?:<!-- (check|fragment): ([^\n]+) -->\n)?```(?:typescript|ts)\n([\s\S]*?)```/g)) {
+  for (const { kind, label: id, code, line, extension } of extractExamples(source, file)) {
     count++;
-    const [, kind, id, code] = match;
-    if (!kind) throw new Error(`Unclassified example: ${file} #${count}`);
-    inventory.push({ file: path.relative(root, file), block: count, kind, id });
-    if (kind === 'check') groups.set(id, [...(groups.get(id) ?? []), code]);
-    else {
+    const name = kind === 'check' ? id : `fragment-${path.basename(file, '.md')}-${count}`;
+    inventory.push({ file: path.relative(root, file), block: count, line, kind,
+      module: name, reason: kind === 'fragment' ? id : undefined });
+    extensions.set(name, extension);
+    if (kind === 'check') {
+      if (groups.has(id) && (!grouped[id] || groupOwners.get(id) !== file)) throw new Error(`Duplicate example ID: ${id}`);
+      groupOwners.set(id, file);
+      groups.set(id, [...(groups.get(id) ?? []), code]);
+    } else {
       const key = `${path.basename(file)}:${count}`;
       const fixture = fixtures[key];
       if (!fixture) throw new Error(`Missing typed fixture: ${key}`);
+      usedFixtures.add(key);
       let body = code;
       let prelude = fixture.prelude + '\n';
       if (fixture.generator) {
@@ -43,36 +56,63 @@ for (const file of files) {
     }
   }
 }
-groups.set('cli-repository', groups.get('cli-tasks').slice(0, 2));
-for (const [name, blocks] of groups) {
-  // Grouped worked examples form one module; repeated identical imports are removed.
-  const imports = new Map();
-  let body = blocks.join('\n').replace(/^import \{([^}]+)\} from ([^\n]+)\n/gm, (_, names, mod) => {
-    mod = mod.replace(/;$/, "");
-    const set = imports.get(mod) ?? new Set();
-    names.split(',').map(x => x.trim()).filter(Boolean).forEach(x => set.add(x));
-    imports.set(mod, set);
-    return '';
-  });
-  body = [...imports].map(([mod, names]) => `import { ${[...names].join(', ')} } from ${mod}`).join('\n') + '\n' + body + '\nexport {}\n';
-  fs.writeFileSync(path.join(generated, `${name}.ts`), body);
+for (const key of Object.keys(fixtures)) {
+  if (!usedFixtures.has(key)) throw new Error(`Stale fragment fixture: ${key}`);
 }
-// Execute the actual generator functions without loading the Pi host.
-const extension = fs.readFileSync(path.join(root, 'extensions/effect-context.ts'), 'utf8');
-const functions = extension.slice(extension.indexOf('// --- Scaffold generators ---'));
-const generators = vm.runInNewContext(ts.transpile(functions + '\n({generateServiceScaffold, generateSchemaScaffold, generateErrorScaffold, generateTestScaffold})', { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None }));
-for (const [name, fn] of Object.entries(generators)) {
-  fs.writeFileSync(path.join(generated, `${name}.ts`), fn('Example') + '\nexport {}\n');
+for (const [id, count] of Object.entries(grouped)) {
+  if (groups.get(id)?.length !== count) throw new Error(`Expected ${count} blocks for ${id}`);
+}
+// Runtime tests use the CLI definitions without the Bun entry point.
+if (groups.has('cli-repository')) throw new Error('cli-repository is reserved for the extracted CLI runtime module');
+groups.set('cli-repository', groups.get('cli-tasks').slice(0, 3));
+for (const [name, blocks] of groups) {
+  fs.writeFileSync(path.join(generated, `${name}.${extensions.get(name) ?? 'ts'}`), mergeBlocks(blocks));
+}
+// Compile the exact text delivered by the registered tool, including its version gate.
+const app = extension();
+await app.events.session_start({}, { cwd: here, ui: { setStatus() {}, notify() {} } });
+for (const type of ['service', 'schema', 'error', 'test']) {
+  const result = await app.tools.effect_scaffold.execute('validation', { type, name: 'Example' });
+  const name = `generate${type[0].toUpperCase() + type.slice(1)}Scaffold`;
+  const exports = type === 'error' ? 'export { ExampleNotFoundError, ExampleValidationError, ExampleError }' : 'export {}';
+  fs.writeFileSync(path.join(generated, `${name}.ts`), result.content[0].text + `\n${exports}\n`);
+}
+const summary = [...new Set(inventory.map(x => x.file))].map(file => {
+  const entries = inventory.filter(x => x.file === file);
+  return `| [${path.basename(file)}](../${file}) | ${entries.filter(x => x.kind === 'check').length} | ${entries.filter(x => x.kind === 'fragment').length} |`;
+});
+const coverage = `# Documentation coverage
+
+Generated by \`npm --prefix validation run coverage:update\`. Validation rejects a stale report.
+
+Every TypeScript fence in the skill and its references compiles. Complete examples use their published imports. Fragments receive the typed context in [fragments.mjs](fragments.mjs). Each exclusion below explains why the fragment is not run.
+
+| Source | Complete or grouped blocks | Fragments with typed context |
+| --- | ---: | ---: |
+${summary.join('\n')}
+
+## Fragment runtime exclusions
+
+| Published block | Missing context or reason |
+| --- | --- |
+${inventory.filter(x => x.kind === 'fragment').map(x => `| [${path.basename(x.file)} #${x.block}](../${x.file}#L${x.line}) | ${x.reason.replaceAll('|', '\\|').replaceAll('<', '&lt;').replaceAll('>', '&gt;')} |`).join('\n')}
+
+Runtime coverage and host limits are in [README.md](README.md). The generated inventory records each module's source line for compiler diagnostics.
+`;
+const coverageFile = path.join(here, 'coverage.md');
+if (process.argv.includes('--update-coverage')) fs.writeFileSync(coverageFile, coverage);
+else if (!fs.existsSync(coverageFile) || fs.readFileSync(coverageFile, 'utf8') !== coverage) {
+  throw new Error('Coverage changed. Review the fences and run npm --prefix validation run coverage:update.');
 }
 fs.writeFileSync(path.join(generated, 'inventory.json'), JSON.stringify(inventory, null, 2));
 fs.writeFileSync(path.join(generated, 'package.json'), JSON.stringify({type: 'module', version: '1.0.0'}));
-const sourceFiles = fs.readdirSync(generated).filter(x => x.endsWith('.ts')).map(x => path.join(generated, x));
+const sourceFiles = fs.readdirSync(generated).filter(x => /\.tsx?$/.test(x)).map(x => path.join(generated, x));
 const localTests = fs.readdirSync(here).filter(x => x.endsWith('.test.ts') || x === 'vitest.config.ts').map(x => path.join(here, x));
 const program = ts.createProgram([...sourceFiles, ...localTests], {
   target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
   moduleResolution: ts.ModuleResolutionKind.Bundler, strict: true,
   exactOptionalPropertyTypes: true, noEmit: true, skipLibCheck: true,
-  resolveJsonModule: true, allowSyntheticDefaultImports: true, types: ['node'], typeRoots: [path.join(here, 'node_modules/@types')],
+  jsx: ts.JsxEmit.ReactJSX, resolveJsonModule: true, allowSyntheticDefaultImports: true, types: ['node'], typeRoots: [path.join(here, 'node_modules/@types')],
 });
 const diagnostics = ts.getPreEmitDiagnostics(program);
 if (diagnostics.length) {

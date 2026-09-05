@@ -1,46 +1,51 @@
-# Effect v4 compatibility validation
+# Validate examples and scaffolds
 
-Supported version: `4.0.0-rc.112`. The skill's [version reference](../skills/effect-ts/references/version-compatibility.md) records the official source revision and migration guides.
-
-Run from the repository root:
+Run from the repository root with Node 22.12 or newer:
 
 ```bash
-npm ci --prefix validation
-npm --prefix validation run check
-npm --prefix validation test
+npm run validate
 ```
 
-Use Node 22 or newer. The checked dependency set is exact in `package.json` and `package-lock.json`: Effect and its Node, Bun, and Vitest companion packages at `4.0.0-rc.112`, Vitest `4.1.11`, and TypeScript `5.9.3`.
+The command installs the lockfile, proves that an invalid published import fails, extracts and typechecks the documentation and scaffold output, then runs the behavior tests. CI runs this command on Node 24 and Linux. Process tests require Bash and standard Unix commands; local verification also runs on macOS.
 
-## What the checks cover
+The API repair established Effect `4.0.0-rc.112`. This setup retains its exact Effect, Node platform, Bun platform, testing, Vitest and TypeScript pins. `package.json` and the lockfile own the dependency versions. The checker rejects ranges and mismatches with the installed dependencies. [Version compatibility](../skills/effect-ts/references/version-compatibility.md) records the matching official Effect source.
 
-`check.mjs` reads every TypeScript fence in the skill and references. It rejects unclassified fences. Currently it checks 83 blocks: 51 complete or grouped examples and 32 illustrative fragments. The CLI task manager and event-registration example each combine consecutive blocks into one module.
+## Documentation connection
 
-Complete examples compile as written, with repeated named imports merged across grouped blocks. Illustrative fragments remain visibly labeled in their reference files. `fragments.mjs` supplies typed application contracts and generator wrappers for them; it does not replace their Effect calls. These fixtures check API compatibility, not the consuming application's behavior. The before-and-after modeling fragments name their legacy declarations separately so both alternatives can compile.
+The checker reads every TypeScript fence in `skills/effect-ts/SKILL.md` and its references. Complete examples compile with their published imports. The task manager, config basics and event tests group their marked blocks into modules; repeated named imports merge without dropping API names.
 
-The checker executes the four generator functions from `extensions/effect-context.ts` and compiles their actual returned TypeScript. Service methods remain application placeholders. The generated test skeleton uses skipped tests until the consuming project wires its service and assertions. The schema generator uses `DateFromString` so its JSON codec accepts ISO dates.
+All 83 blocks compile, including 51 complete or grouped blocks and 32 illustrative fragments. [coverage.md](coverage.md) lists the counts and each fragment's runtime exclusion reason. Fragments retain their published Effect calls and receive missing application types or generator wrappers from `fragments.mjs`. They are compatibility checks, not runnable applications.
 
-Generated files and the per-block `inventory.json` live in `generated/`, which Git ignores. Validation compiles with strict mode and exact optional property types. It checks dependency metadata against the supported version and typechecks the behavior tests too. Library declaration checking is skipped; no example errors are suppressed.
+Unclassified fences, accidental duplicate IDs, stale fragment fixtures and stale coverage reports fail the check. When editing a fence, keep its `check` ID or its concrete `fragment` reason immediately above it. After adding or moving examples, inspect the coverage changes produced by `npm --prefix validation run coverage:update`, then rerun validation. New runtime suites also need an entry in `vitest.config.ts`.
 
-Vitest runs the actual extracted testing examples and focused behavior checks for:
+The checker regenerates ignored files in `validation/generated/`. `inventory.json` maps modules to source lines. TypeScript uses strict mode and exact optional property types. Library declarations use `skipLibCheck`; example errors have no suppression. `allowOnly: false` rejects accidentally focused runtime tests. The illustrative test-modifier fragment compiles but never runs.
 
-- Schema defaults, constructor defaults, branded constraints, and Date JSON round trips.
-- Config parsing, missing-only defaults, redaction, arrays, and environment prefixes.
-- HTTP success, schema failures, 404 mapping, status failures, and transport failures using a supplied fetch implementation.
-- Task repository persistence, toggling, and preserving corrupt-file errors.
-- Concurrent process stdin/stdout/stderr handling and cleanup through explicit stop or owner scope closure.
-- Installed-version resolution, hook routing, scaffold guards, and extension pattern detection.
+## Runtime coverage
 
-## Corrections recorded in this slice
+Tests import extracted documentation modules. Seven published testing suites run directly, including their assertions after scope closure and their repeated fresh-state tests.
 
-Services use `Context.Service`. Schema classes supply their self types; errors use `Schema.TaggedError`; constructors use `.make`; defect codecs call `Schema.Defect()`. Validation predicates use `Schema.check`. Decoding defaults and constructor defaults are explicit. Date and redacted schemas preserve their intended encoded inputs.
+| Area | Executed behavior |
+| --- | --- |
+| Services and layers | HTTP service provisioning, event orchestration, independent user/email stores and ticket counters across tests |
+| Schemas and errors | Defaults, branded constraints, Date JSON round trips, tagged error decoding and recovery |
+| HTTP | Success, schema rejection, 404 mapping, other status failures and transport failures through supplied fetch implementations |
+| CLI | Published task repository and command handlers, argument and flag parsing, omitted boolean defaults, invalid input, persistence, toggling and corrupt-file errors |
+| Config | Parsing, missing-only defaults, redaction, arrays and environment prefixes |
+| Resources | Temp-directory removal after a test, concurrent stdin/stdout/stderr, explicit stop, scope closure, interrupted owners and cleanup after acquisition failure |
+| Testing | TestClock, live clock, logging, fiber-local overrides, fresh test layers and automatic scope cleanup |
 
-HTTP services declare transport and schema errors, check status codes, and inspect the nested `HttpClientError.reason`. Config arrays use schemas and object providers use `fromUnknown`. CLI execution uses the Effect returned by `Command.run`; filesystem failures remain in the task repository's contract. `Schedule.max` combines bounded retry policies. Testing uses `Context.Reference` with `Effect.provideService` and the current logger layer API.
+The checker registers `extensions/effect-context.ts` with a small Pi adapter and calls the actual scaffold tool for service, schema, error and test output. All four returned modules compile. Behavior tests exercise service construction, schema round trips and tagged errors. The generated test suite loads and reports its three application placeholders as skipped. Service storage and domain methods still need consuming-project implementations.
 
-Process examples use `ChildProcess` and `ChildProcessSpawner`, `Scope.provide`, and current fork APIs. Output collection belongs to the task's scope, both output pipes drain concurrently, and acquisition failure retains cleanup ownership. Hook and extension detectors recognize current APIs. Legacy names remain only as migration detection patterns.
+## Hooks and extension
 
-## Limits
+Subprocess tests run the Claude hooks with JSON input. Extension tests invoke registered callbacks, commands and tools through the adapter. They cover installed-version selection, unsupported and missing installs, nested packages, hoisting, symlinks, changed installations, reference routing, aliases, short reads, failed reads, concurrent hook calls and session reset.
 
-The Bun entry points typecheck but have not run under Bun. Pi registration and callbacks run against a small host mock; this does not replace an installed Pi or Claude Code session. The optional Effect language service is outside the pinned dependency set. Its setup guide directs agents to verify the installed plugin's compatibility before using it.
+Claude's [hook output protocol](https://code.claude.com/docs/en/hooks#json-output) defines `hookEventName` and `additionalContext`. Returning an `env` object does not persist deduplication. Hooks now claim reference files atomically in a temporary directory keyed by session, working directory and supported version. SessionStart resets those claims, including after compaction; SessionEnd removes them. Without session metadata or writable storage, hooks emit context again. Tests set `EFFECT_SESSION_STATE_DIR` to isolated temporary directories. An abrupt host exit can leave small cache files for the operating system's temporary-file cleanup.
 
-No live external HTTP service is required. Generated service implementations and the 32 labeled illustrative fragments still require application-specific work. No compatibility claim extends to other Effect releases.
+Pi deduplicates by reference file, so `services` and `layers` share a claim. Version detection reads the nearest installed `node_modules/effect/package.json` afresh, including hoisted and symlinked installs. It avoids Node's cached resolution after dependency changes. Installations without `node_modules`, such as Yarn PnP, remain unresolved and receive version guidance.
+
+## Failure proof and limits
+
+`npm --prefix validation run prove:failure` copies the validation inputs into a temporary directory and inserts `InvalidEffectApi` into the published core-service import. It requires checker exit code 1 and TypeScript diagnostic TS2305 for that import. It deletes the copy afterward. The main command then checks the correct working files and runs the tests.
+
+Bun entry points compile but do not run under Bun. HTTP tests use local responses and make no external requests. Pi rendering, SDK type compatibility and callback delivery in a real Pi session remain unverified. Claude hook discovery and context delivery in a real Claude Code session also remain unverified. The mocked registration and subprocess tests do not establish those host behaviors. The GitHub workflow has been added but has not run on GitHub in this slice. Compatibility with other Effect releases and the optional Effect language service is outside this check.

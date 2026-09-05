@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { resetSession } from "./session-state.mjs";
 import { effectProjectStatus } from "./effect-version.mjs";
 
 const pluginRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -22,7 +23,10 @@ function loadSkill() {
   }
 }
 
-const input = JSON.parse(readFileSync("/dev/stdin", "utf-8"));
+let input;
+try { input = JSON.parse(readFileSync("/dev/stdin", "utf-8")); }
+catch { process.stdout.write("{}"); process.exit(0); }
+resetSession(input);
 
 const status = effectProjectStatus(input.cwd || process.env.CLAUDE_CWD || process.cwd());
 if (status.detected) {
@@ -30,6 +34,7 @@ if (status.detected) {
   if (skill) {
     const output = {
       hookSpecificOutput: {
+        hookEventName: "SessionStart",
         additionalContext: `<effect-ts-patterns>\n${skill}\n</effect-ts-patterns>`,
       },
     };

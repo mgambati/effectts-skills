@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { Config, ConfigProvider, Effect, Exit, FileSystem, Layer, PlatformError, Redacted, Schema } from "effect"
+import { Config, ConfigProvider, Deferred, Effect, Exit, Fiber, FileSystem, Layer, PlatformError, Redacted, Schema } from "effect"
 import { NodeServices } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
 import { Config as Defaults } from "./generated/schema-struct"
@@ -10,9 +10,14 @@ import { ApiConfig } from "./generated/config-service"
 import { Port } from "./generated/config-schema"
 import { GitHubApi } from "./generated/http-service"
 import { Users, Analytics } from "./generated/services-http"
-import { TaskRepo } from "./generated/cli-repository"
+import { app, TaskRepo } from "./generated/cli-repository"
 import { runWithInput } from "./generated/process-input"
 import { startBackground } from "./generated/process-background"
+import { Command } from "effect/unstable/cli"
+import { TestConsole } from "effect/testing"
+import { ChildProcessSpawner } from "effect/unstable/process"
+import { Example, ExampleId } from "./generated/generateServiceScaffold"
+import { ExampleNotFoundError, ExampleValidationError } from "./generated/generateErrorScaffold"
 
 it.effect("decoding defaults apply to missing and undefined fields", () => Effect.gen(function* () {
   expect(Defaults.make({ timeout: 5000 })).toEqual({ timeout: 5000, retries: 3 })
@@ -112,10 +117,10 @@ it.effect("task repository writes, reloads, toggles and preserves corrupt-file e
 
 it.live("stdin and both output pipes drain without blocking", () => Effect.gen(function* () {
   const input = "x".repeat(256 * 1024)
-  const result = yield* runWithInput("cat; printf err >&2", input)
+  const result = yield* runWithInput("head -c 262144 /dev/zero >&2; cat", input)
   expect(result.exitCode).toBe(0)
   expect(result.output).toBe(input)
-  expect(result.stderr).toBe("err")
+  expect(result.stderr).toBe("\0".repeat(256 * 1024))
 }))
 
 it.live("background stop and owner scope close terminate the child", () => Effect.gen(function* () {
@@ -125,4 +130,83 @@ it.live("background stop and owner scope close terminate the child", () => Effec
   expect(yield* stopped.process.isRunning).toBe(false)
   const owned = yield* Effect.scoped(startBackground("exec sleep 30"))
   expect(yield* owned.process.isRunning).toBe(false)
+}).pipe(Effect.provide(NodeServices.layer)))
+
+it.effect("generated service layers build separately and expose their placeholder contract", () => Effect.gen(function* () {
+  for (const layer of [Example.layer, Example.testLayer]) {
+    const first = yield* Example.pipe(Effect.provide(layer))
+    const second = yield* Example.pipe(Effect.provide(layer))
+    expect(first).not.toBe(second)
+    expect(yield* first.create({ name: "sample" })).toEqual({ name: "sample" })
+  }
+  const service = yield* Example.pipe(Effect.provide(Example.layer))
+  expect(yield* service.findById(ExampleId.make("example-1"))).toEqual({ id: "example-1" })
+}))
+
+it.effect("generated errors decode, yield as failures and recover by tag", () => Effect.gen(function* () {
+  const error = yield* Schema.decodeUnknownEffect(ExampleNotFoundError)({
+    _tag: "ExampleNotFoundError", id: "missing", message: "No record",
+  })
+  const recovered = yield* Effect.gen(function* () { return yield* error }).pipe(
+    Effect.catchTag("ExampleNotFoundError", error => Effect.succeed(error.id)),
+  )
+  expect(recovered).toBe("missing")
+  const invalid = new ExampleValidationError({ field: "name", message: "Required" })
+  expect(yield* Schema.encodeEffect(ExampleValidationError)(invalid)).toEqual({
+    _tag: "ExampleValidationError", field: "name", message: "Required",
+  })
+}))
+
+it.effect("published CLI commands parse arguments, flags and invalid input", () => Effect.gen(function* () {
+  let content = '{"tasks":[]}'
+  const fsLayer = FileSystem.layerNoop({
+    readFileString: () => Effect.sync(() => content),
+    writeFileString: (_path, value) => Effect.sync(() => { content = value }),
+  })
+  const run = Command.runWith(app, { version: "1.0.0", renderErrors: false })
+  yield* Effect.gen(function* () {
+    const repo = yield* TaskRepo
+    yield* run(["add", "buy milk"])
+    expect((yield* repo.list())[0].text).toBe("buy milk")
+    yield* run(["toggle", "1"])
+    expect(yield* repo.list()).toEqual([])
+    yield* run(["list"])
+    expect((yield* TestConsole.logLines).at(-1)).toBe("No tasks.")
+    yield* run(["list", "--all"])
+    expect((yield* TestConsole.logLines).at(-1)).toBe("[x] #1 buy milk")
+    expect((yield* repo.list(true))[0].done).toBe(true)
+    expect(Exit.isFailure(yield* Effect.exit(run(["toggle", "invalid"])))).toBe(true)
+    expect(Exit.isFailure(yield* Effect.exit(run(["add"])))).toBe(true)
+    yield* run(["clear"])
+    expect(yield* repo.list(true)).toEqual([])
+  }).pipe(Effect.provide(TaskRepo.layer.pipe(Layer.provide(fsLayer))), Effect.provide(NodeServices.layer))
+}))
+
+it.effect("background acquisition failure closes its scope before the owner ends", () => Effect.gen(function* () {
+  let released = false
+  const spawner = ChildProcessSpawner.make(() => Effect.gen(function* () {
+    yield* Effect.acquireRelease(Effect.void, () => Effect.sync(() => { released = true }))
+    return yield* Effect.fail(PlatformError.systemError({
+      _tag: "NotFound", module: "ChildProcess", method: "spawn",
+    }))
+  }))
+  const result = yield* Effect.exit(startBackground("unused").pipe(
+    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+  ))
+  expect(Exit.isFailure(result)).toBe(true)
+  expect(released).toBe(true)
+}))
+
+it.live("interrupting the owner terminates its background process and collector", () => Effect.gen(function* () {
+  const ready = yield* Deferred.make<Effect.Success<ReturnType<typeof startBackground>>>()
+  const owner = yield* Effect.gen(function* () {
+    const task = yield* startBackground("exec sleep 30")
+    yield* Deferred.succeed(ready, task)
+    yield* Effect.never
+  }).pipe(Effect.scoped, Effect.forkScoped)
+  const task = yield* Deferred.await(ready)
+  expect(yield* task.process.isRunning).toBe(true)
+  yield* Fiber.interrupt(owner)
+  expect(yield* task.process.isRunning).toBe(false)
+  expect(Exit.isFailure(yield* Fiber.await(task.result))).toBe(true)
 }).pipe(Effect.provide(NodeServices.layer)))

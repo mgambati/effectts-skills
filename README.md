@@ -65,6 +65,10 @@ The full `effect-ts` skill with progressive disclosure:
 | `version-compatibility.md` | Installed version detection, matching source and docs, supported dependency set |
 | `setup.md` | tsconfig, Effect Language Service, module settings, dev workflow |
 
+## Validation
+
+Run `npm run validate` from the repository root. It installs the pinned validation dependencies, proves an invalid documentation import fails, checks all TypeScript examples and generated scaffolds, and runs the behavior tests. See [coverage and host limits](validation/README.md).
+
 ## Sources
 
 The original patterns came from these repositories. The compatibility pass verifies APIs against the official pinned source linked above:

@@ -101,18 +101,29 @@ it.live("real clock", () =>
 
 ### Scoped Resources
 
-Scoping is automatic in v4. The scope closes when the test ends:
+Scoping is automatic in v4. Check resource removal in `afterEach`, after the test scope closes:
 
 <!-- check: testing-scoped -->
 ```typescript
 import { Effect, FileSystem } from "effect"
 import { NodeFileSystem } from "@effect/platform-node"
+import { existsSync, rmSync } from "node:fs"
+import { afterEach } from "vitest"
 import { expect, it } from "@effect/vitest"
+
+let directory: string | undefined
+afterEach(() => {
+  if (directory) {
+    try { expect(existsSync(directory)).toBe(false) }
+    finally { rmSync(directory, { recursive: true, force: true }); directory = undefined }
+  }
+})
 
 it.effect("temp directory cleaned up", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     const tempDir = yield* fs.makeTempDirectoryScoped()
+    directory = tempDir
     yield* fs.writeFileString(`${tempDir}/test.txt`, "hello")
     expect(yield* fs.exists(`${tempDir}/test.txt`)).toBe(true)
     // scope closes, tempDir is deleted
@@ -331,6 +342,24 @@ const testLayer = Events.layer.pipe(
 )
 
 describe("Events.register", () => {
+  // Reusing a Layer value with per-test provide still allocates fresh state.
+  for (const run of ["first", "second"]) {
+    it.effect(`starts with fresh stores in the ${run} test`, () =>
+      Effect.gen(function* () {
+        const users = yield* Users
+        const emails = yield* Emails
+        const events = yield* Events
+        const id = UserId.make("isolation-user")
+        expect((yield* Effect.flip(users.findById(id)))._tag).toBe("UserNotFound")
+        expect(yield* emails.sent).toHaveLength(0)
+        yield* users.create(new User({ id, name: "Alice", email: "alice@example.com" }))
+        const registration = yield* events.register(EventId.make("event-1"), id)
+        expect(registration.ticketId).toBe("ticket-0")
+        expect(yield* emails.sent).toHaveLength(1)
+      }).pipe(Effect.provide(testLayer))
+    )
+  }
+
   it.effect("creates registration with correct data", () =>
     Effect.gen(function* () {
       const users = yield* Users

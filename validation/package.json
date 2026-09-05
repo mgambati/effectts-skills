@@ -2,7 +2,13 @@
   "name": "effect-skill-validation",
   "private": true,
   "type": "module",
-  "scripts": { "check": "node check.mjs", "test": "vitest run" },
+  "scripts": {
+    "validate": "npm run prove:failure && npm run check && npm test",
+    "check": "node check.mjs",
+    "coverage:update": "node check.mjs --update-coverage",
+    "test": "vitest run",
+    "prove:failure": "node prove-failure.mjs"
+  },
   "devDependencies": {
     "effect": "4.0.0-rc.112",
     "@effect/platform-node": "4.0.0-rc.112",
@@ -11,5 +17,8 @@
     "vitest": "4.1.11",
     "typescript": "5.9.3",
     "@types/node": "26.2.0"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

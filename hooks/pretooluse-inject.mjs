@@ -7,6 +7,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { claimReference } from "./session-state.mjs";
 import { effectProjectStatus } from "./effect-version.mjs";
 
 const pluginRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -22,9 +23,6 @@ const PATTERNS = [
   { match: /Config\.redacted|Config\.schema|ConfigProvider/, ref: "config.md" },
   { match: /Scope\.make|Scope\.(provide|extend)|Effect\.fork(Child|Detach|In|Scoped|Daemon)|ChildProcess/, ref: "processes.md" },
 ];
-
-// Track injected refs per session via env
-const seen = new Set((process.env.EFFECT_SEEN_REFS || "").split(",").filter(Boolean));
 
 function loadRef(file) {
   try {
@@ -52,7 +50,7 @@ const fullPath = filePath.startsWith("/") ? filePath : join(input.cwd || process
 const status = effectProjectStatus(dirname(fullPath));
 if (!status.supported) {
   process.stdout.write(status.detected
-    ? JSON.stringify({ hookSpecificOutput: { additionalContext: status.message } })
+    ? JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: status.message } })
     : "{}");
   process.exit(0);
 }
@@ -75,10 +73,9 @@ if (!content) {
 // Find first matching pattern not yet injected
 let injected = null;
 for (const { match, ref } of PATTERNS) {
-  if (match.test(content) && !seen.has(ref)) {
+  if (match.test(content)) {
     const doc = loadRef(ref);
-    if (doc) {
-      seen.add(ref);
+    if (doc && claimReference(input, ref)) {
       injected = { ref, doc };
       break;
     }
@@ -88,10 +85,8 @@ for (const { match, ref } of PATTERNS) {
 if (injected) {
   const output = {
     hookSpecificOutput: {
+      hookEventName: "PreToolUse",
       additionalContext: `<effect-reference topic="${injected.ref}">\n${injected.doc}\n</effect-reference>`,
-    },
-    env: {
-      EFFECT_SEEN_REFS: [...seen].join(","),
     },
   };
   process.stdout.write(JSON.stringify(output));

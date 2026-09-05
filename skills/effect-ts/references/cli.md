@@ -26,7 +26,7 @@ import { BunServices, BunRuntime } from "@effect/platform-bun"
 import { Console, Effect } from "effect"
 
 const name = Argument.string("name").pipe(Argument.withDefault("World"))
-const shout = Flag.boolean("shout").pipe(Flag.withAlias("s"))
+const shout = Flag.boolean("shout").pipe(Flag.withAlias("s"), Flag.withDefault(false))
 
 const greet = Command.make("greet", { name, shout }, ({ name, shout }) => {
   const message = `Hello, ${name}!`
@@ -71,12 +71,14 @@ Argument.integer("id").pipe(Argument.withSchema(TaskId)) // schema-validated
 ```typescript
 import { Flag } from "effect/unstable/cli"
 
-Flag.boolean("verbose").pipe(Flag.withAlias("v"))     // boolean
+Flag.boolean("verbose").pipe(Flag.withAlias("v"), Flag.withDefault(false))     // boolean
 Flag.string("output").pipe(Flag.withAlias("o"))       // text
 Flag.string("config").pipe(Flag.optional)             // optional text
 Flag.choice("format", ["json", "yaml", "toml"])       // enum
 Flag.integer("count").pipe(Flag.withDefault(10))      // integer with default
 ```
+
+A boolean flag without a default is required in this release. Use `Flag.withDefault(false)` when omission should mean false.
 
 Add descriptions for help output:
 
@@ -224,7 +226,7 @@ const addCmd = Command.make("add", {
 ).pipe(Command.withDescription("Add a new task"))
 
 const listCmd = Command.make("list", {
-  all: Flag.boolean("all").pipe(Flag.withAlias("a"), Flag.withDescription("Include completed")),
+  all: Flag.boolean("all").pipe(Flag.withDefault(false), Flag.withAlias("a"), Flag.withDescription("Include completed")),
 }, ({ all }) =>
   Effect.gen(function* () {
     const repo = yield* TaskRepo
@@ -256,7 +258,7 @@ const clearCmd = Command.make("clear", {}, () =>
   })
 ).pipe(Command.withDescription("Clear all tasks"))
 
-const app = Command.make("tasks").pipe(
+export const app = Command.make("tasks").pipe(
   Command.withDescription("A simple task manager"),
   Command.withSubcommands([addCmd, listCmd, toggleCmd, clearCmd]),
 )

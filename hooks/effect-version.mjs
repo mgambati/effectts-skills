@@ -1,5 +1,4 @@
 import { readFileSync, existsSync } from "node:fs";
-import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 
 export const SUPPORTED_EFFECT_VERSION = "4.0.0-rc.112";
@@ -23,8 +22,19 @@ export function effectProjectStatus(cwd) {
   const declared = Object.keys(dependencies).some((name) => name === "effect" || name.startsWith("@effect/"));
   let version;
   try {
-    const resolved = createRequire(manifest).resolve("effect/package.json");
-    version = JSON.parse(readFileSync(resolved, "utf8")).version;
+    // Inspect each lookup location afresh. Node's resolution cache can retain a
+    // hoisted installation after a nearer package is installed during a session.
+    let lookup = directory;
+    while (true) {
+      const installed = join(lookup, "node_modules/effect/package.json");
+      if (existsSync(installed)) {
+        version = JSON.parse(readFileSync(installed, "utf8")).version;
+        break;
+      }
+      const parent = dirname(lookup);
+      if (parent === lookup) break;
+      lookup = parent;
+    }
   } catch {
     // An unresolved install is not evidence of a supported version.
   }

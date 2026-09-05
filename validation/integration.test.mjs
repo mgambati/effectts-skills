@@ -3,9 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
-import vm from "node:vm";
-import ts from "typescript";
+import { execFile, execFileSync } from "node:child_process";
+import { extension } from "./extension-host.mjs";
 import * as compatibility from "../hooks/effect-version.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -21,13 +20,13 @@ function project(version, range = "^4.0.0-rc.112") {
   }
   return cwd;
 }
-function hook(name, cwd, source) {
+function hook(name, cwd, source, extra = {}) {
   const file = path.join(cwd, "example.ts");
   if (source) fs.writeFileSync(file, source);
   return JSON.parse(execFileSync(process.execPath, [path.join(root, "hooks", name)], {
     cwd,
-    input: JSON.stringify({ cwd, tool_input: { file_path: file } }),
-    env: { ...process.env, EFFECT_SEEN_REFS: "" },
+    input: JSON.stringify({ cwd, tool_input: { file_path: file }, ...extra }),
+    env: { ...process.env, EFFECT_SESSION_STATE_DIR: path.join(cwd, ".hook-state") },
     encoding: "utf8",
   }));
 }
@@ -57,32 +56,6 @@ it("read hook recognizes v4 services and processes and declines v3 injection", (
   expect(hook("pretooluse-inject.mjs", project("3.19.0"), "Effect.forkDaemon(work)").hookSpecificOutput.additionalContext).not.toContain("<effect-reference");
 });
 
-function extension() {
-  const filename = path.join(root, "extensions/effect-context.ts");
-  const source = fs.readFileSync(filename, "utf8");
-  const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }, reportDiagnostics: true });
-  expect(compiled.diagnostics).toEqual([]);
-  const exported = {};
-  vm.runInNewContext(compiled.outputText, {
-    exports: exported, __filename: filename, process,
-    require(name) {
-      if (name === "node:fs") return fs;
-      if (name === "node:path") return path;
-      if (name === "../hooks/effect-version.mjs") return compatibility;
-      if (name === "@sinclair/typebox") return { Type: { Object: x => x, String: x => x } };
-      if (name === "@mariozechner/pi-ai") return { StringEnum: x => x };
-      throw new Error(`Unexpected host import: ${name}`);
-    },
-  });
-  const events = {}, commands = {}, tools = {}, messages = [];
-  exported.default({
-    on: (name, fn) => { events[name] = fn },
-    registerCommand: (name, command) => { commands[name] = command },
-    registerTool: tool => { tools[tool.name] = tool },
-    sendMessage: message => messages.push(message),
-  });
-  return { events, commands, tools, messages };
-}
 function context(cwd) {
   return { cwd, ui: { setStatus() {}, notify() {} } };
 }
@@ -106,4 +79,115 @@ it("extension gates every scaffold entry and recognizes current patterns", async
     content: [{ type: "text", text: "import { ChildProcess } from 'effect/unstable/process'; const child = ChildProcess.make('git', ['status']);" }],
   }, supported);
   expect(result.content.at(-1).text).toContain("/effect:docs processes");
+});
+
+it("hook deduplication survives separate processes and resets with session context", () => {
+  const cwd = project("4.0.0-rc.112");
+  const input = { session_id: "session-a" };
+  const code = "Context.Service; Schema.Struct({});";
+  expect(hook("pretooluse-inject.mjs", cwd, code, input).hookSpecificOutput).toMatchObject({
+    hookEventName: "PreToolUse",
+    additionalContext: expect.stringContaining('topic="services-and-layers.md"'),
+  });
+  expect(hook("pretooluse-inject.mjs", cwd, code, input).hookSpecificOutput.additionalContext).toContain('topic="data-modeling.md"');
+  expect(hook("pretooluse-inject.mjs", cwd, code, input)).toEqual({});
+  expect(hook("pretooluse-inject.mjs", cwd, code, { session_id: "session-b" }).hookSpecificOutput).toBeDefined();
+  hook("session-start.mjs", cwd, undefined, input);
+  expect(hook("pretooluse-inject.mjs", cwd, code, input).hookSpecificOutput).toBeDefined();
+  hook("session-end.mjs", cwd, undefined, input);
+  expect(fs.readdirSync(path.join(cwd, ".hook-state"))).toHaveLength(1); // session-b remains
+});
+
+it("version detection respects nested packages, hoisting and malformed manifests", () => {
+  const cwd = project("4.0.0-rc.112");
+  const nested = path.join(cwd, "packages/app");
+  fs.mkdirSync(path.join(nested, "src"), { recursive: true });
+  fs.writeFileSync(path.join(nested, "package.json"), JSON.stringify({ dependencies: { effect: "*" } }));
+  expect(compatibility.effectProjectStatus(path.join(nested, "src")).supported).toBe(true);
+  fs.mkdirSync(path.join(nested, "node_modules/effect"), { recursive: true });
+  fs.writeFileSync(path.join(nested, "node_modules/effect/package.json"), JSON.stringify({ version: "3.19.0" }));
+  expect(compatibility.effectProjectStatus(nested)).toMatchObject({ supported: false, version: "3.19.0" });
+  fs.writeFileSync(path.join(nested, "package.json"), "bad json");
+  expect(compatibility.effectProjectStatus(nested)).toMatchObject({ detected: false, supported: false });
+});
+
+it("extension deduplicates reference aliases, advances topics, and resets per session", async () => {
+  const app = extension();
+  const ctx = context(project("4.0.0-rc.112"));
+  const read = { toolName: "read", input: { path: "example.ts" }, content: [{ type: "text", text: "Context.Service; Schema.Struct({});" }] };
+  await app.events.session_start({}, ctx);
+  await app.commands["effect:docs"].handler("layers", ctx);
+  expect(app.messages[0].content).toContain("# Services & Layers");
+  const first = await app.events.tool_result(read, ctx);
+  expect(first.content.at(-1).text).toContain("/effect:docs data-modeling");
+  expect(await app.events.tool_result(read, ctx)).toBeUndefined();
+  await app.events.session_start({}, ctx);
+  expect((await app.events.tool_result(read, ctx)).content.at(-1).text).toContain("/effect:docs services");
+  await app.events.session_start({}, ctx);
+  expect(await app.events.tool_result({ ...read, isError: true }, ctx)).toBeUndefined();
+  await app.tools.effect_docs.execute("id", { topic: "layers" });
+  expect((await app.events.tool_result(read, ctx)).content.at(-1).text).toContain("/effect:docs data-modeling");
+});
+
+it.each([
+  ["Context.Reference", "services-and-layers"],
+  ["Schema.Struct({})", "data-modeling"],
+  ["Schema.TaggedError", "error-handling"],
+  ["it.effect", "testing"],
+  ["HttpClient", "http-clients"],
+  ["Flag.boolean", "cli"],
+  ["Config.schema", "config"],
+  ["ChildProcess.make", "processes"],
+])("read hook selects the reference for %s", (code, topic) => {
+  const result = hook("pretooluse-inject.mjs", project("4.0.0-rc.112"), code);
+  expect(result.hookSpecificOutput.additionalContext).toContain(`topic="${topic}.md"`);
+});
+
+it("parallel hook processes claim a reference once", async () => {
+  const cwd = project("4.0.0-rc.112");
+  const file = path.join(cwd, "example.ts");
+  fs.writeFileSync(file, "Context.Service");
+  const input = JSON.stringify({ cwd, session_id: "parallel", tool_input: { file_path: file } });
+  const run = () => new Promise((resolve, reject) => {
+    const child = execFile(process.execPath, [path.join(root, "hooks/pretooluse-inject.mjs")], {
+      cwd, env: { ...process.env, EFFECT_SESSION_STATE_DIR: path.join(cwd, ".hook-state") },
+    }, (error, stdout) => error ? reject(error) : resolve(JSON.parse(stdout)));
+    child.stdin.end(input);
+  });
+  const results = await Promise.all([run(), run(), run()]);
+  expect(results.filter(result => result.hookSpecificOutput)).toHaveLength(1);
+});
+
+it("hooks handle malformed input and non-Effect projects without injecting", () => {
+  const cwd = project();
+  fs.writeFileSync(path.join(cwd, "package.json"), "{}");
+  expect(hook("session-start.mjs", cwd)).toEqual({});
+  expect(hook("pretooluse-inject.mjs", cwd, "Context.Service")).toEqual({});
+  for (const name of ["session-start.mjs", "pretooluse-inject.mjs", "session-end.mjs"]) {
+    expect(execFileSync(process.execPath, [path.join(root, "hooks", name)], { input: "bad json", encoding: "utf8" })).toBe("{}");
+  }
+});
+
+it("version detection follows workspace symlinks and reads changed installed metadata", () => {
+  const cwd = project("4.0.0-rc.112");
+  const linked = project();
+  fs.mkdirSync(path.join(linked, "node_modules"));
+  fs.symlinkSync(path.join(cwd, "node_modules/effect"), path.join(linked, "node_modules/effect"));
+  expect(compatibility.effectProjectStatus(linked).supported).toBe(true);
+  fs.writeFileSync(path.join(cwd, "node_modules/effect/package.json"), JSON.stringify({ version: "4.0.0-rc.113" }));
+  expect(compatibility.effectProjectStatus(linked)).toMatchObject({ supported: false, version: "4.0.0-rc.113" });
+});
+
+it("extension blocks references for a nested unsupported package", async () => {
+  const app = extension();
+  const ctx = context(project("4.0.0-rc.112"));
+  const nested = path.join(ctx.cwd, "legacy");
+  fs.mkdirSync(path.join(nested, "node_modules/effect"), { recursive: true });
+  fs.writeFileSync(path.join(nested, "package.json"), JSON.stringify({ dependencies: { effect: "3.19.0" } }));
+  fs.writeFileSync(path.join(nested, "node_modules/effect/package.json"), JSON.stringify({ version: "3.19.0" }));
+  await app.events.session_start({}, ctx);
+  expect(await app.events.tool_result({
+    toolName: "read", input: { path: "legacy/index.ts" },
+    content: [{ type: "text", text: "Context.Service" }],
+  }, ctx)).toBeUndefined();
 });

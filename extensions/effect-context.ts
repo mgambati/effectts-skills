@@ -105,7 +105,7 @@ export default function (pi: ExtensionAPI) {
   // --- Smart context injection on file reads ---
   pi.on("tool_result", async (event, ctx) => {
     if (!isEffectProject) return;
-    if (event.toolName !== "read") return;
+    if (event.toolName !== "read" || event.isError) return;
     const input = event.input as { path?: string } | undefined;
     if (input?.path && !effectProjectStatus(path.dirname(path.resolve(ctx.cwd, input.path))).supported) return;
 
@@ -115,11 +115,11 @@ export default function (pi: ExtensionAPI) {
       .map((c: any) => c.text)
       .join("\n");
 
-    if (!textContent || textContent.length < 50) return;
+    if (!textContent) return;
 
     // Detect Effect patterns
     const topics = detectPatterns(textContent);
-    const newTopics = topics.filter((t) => !injectedTopics.has(t));
+    const newTopics = topics.filter((t) => !injectedTopics.has(TOPICS[t]!.file));
 
     if (newTopics.length === 0) return;
 
@@ -130,7 +130,7 @@ export default function (pi: ExtensionAPI) {
     for (const topic of toInject) {
       const meta = TOPICS[topic];
       if (meta) {
-        injectedTopics.add(topic);
+        injectedTopics.add(meta.file);
         hints.push(`[Effect patterns detected: ${meta.label}. Use /effect:docs ${topic} for full reference.]`);
       }
     }
@@ -175,7 +175,7 @@ export default function (pi: ExtensionAPI) {
         { triggerTurn: false }
       );
       ctx.ui.notify(`Loaded: ${meta.label}`, "success");
-      injectedTopics.add(topic);
+      injectedTopics.add(meta.file);
     },
   });
 
@@ -277,7 +277,7 @@ export default function (pi: ExtensionAPI) {
           details: {},
         };
       }
-      injectedTopics.add(params.topic);
+      injectedTopics.add(TOPICS[params.topic]!.file);
       return {
         content: [{ type: "text", text: `${effectProjectStatus(sessionCwd).message ?? "Resolve the consuming Effect version first."}\n\n${content}` }],
         details: { topic: params.topic, label: TOPICS[params.topic]?.label },
