@@ -1,6 +1,6 @@
 # Version compatibility
 
-This skill supports `effect@4.0.0-rc.112`. The companion packages checked here are `@effect/platform-node`, `@effect/platform-bun`, and `@effect/vitest`, all at `4.0.0-rc.112`. The validation project pins the full dependency set and lockfile in `validation/`.
+The examples target `effect@4.0.0-rc.112`. The validation manifest and lockfile own the exact companion and toolchain versions. When maintaining the full repository, read `validation/README.md`; a skills-only installation does not include that project.
 
 ## Identify the consuming version
 
@@ -10,32 +10,15 @@ Record the installed version, not just a range such as `^4.0.0-rc.112`. Check re
 
 For v3, use that project's installed v3 release and official v3 source and docs. These references are v4 guidance. For any other v4 release, prerelease, unresolved installation, or conflicting lockfile and installed state, verify the APIs against the actual target before adapting these examples. Keep the current version unless the task authorizes a migration.
 
-## Fetch matching documentation
+## Find matching source and documentation
 
-Use the configured Context7 workflow. Resolve the official library first, then query the version ID returned by that lookup. Keep each query about one concept and include the exact installed version.
+1. Start with the consuming installation's package source and declarations. Resolve them through that package's own environment, including its package manager loader when necessary. A workspace root's installation may differ from the package being edited.
+2. Follow any repository documentation-lookup instructions. If Context7 is available, resolve the official library, then query the returned version ID for the installed release and the API in question. Use only IDs returned by the lookup. If the exact version is absent, use the matching published source. Check the revision behind each result; a default-branch link or a migration guide's old example is not evidence for the target signature.
+3. When the installed package lacks needed tests or migration material, locate a matching official release tag or published source revision. For this reference release, `effect@4.0.0-rc.112` resolves to `2600f62f4532026928454dcea8d1c48557b3f942`. For another release, establish its mapping before downloading source.
+4. Use an existing mirror only after verifying its origin and revision. Otherwise create an isolated checkout under an unused temporary or cache directory supplied by the environment. Fetch the verified tag or revision from the official Effect repository and confirm the checkout's HEAD matches it. Preserve existing checkouts and keep downloaded source outside product commits.
+5. Read the relevant implementation, exported signature, and tests. Finish when they establish the behavior being changed at the consuming version. Record the version and evidence used. If source or network access is unavailable, report the gap and leave the affected API unverified.
 
-```bash
-npx ctx7@latest library Effect "Effect 4.0.0-rc.112 schema defaults and Date migration semantics"
-npx ctx7@latest docs /effect-ts/effect/effect_4.0.0-rc.112 "How do schema decoding defaults and constructor defaults work in Effect 4.0.0-rc.112?"
-```
-
-The version ID above was returned by the lookup for this release. Resolve again for another version; never invent an ID. Stay within the configured three-command limit per question. If Context7 lacks the exact version, use matching official source. A result linked to `main`, or a migration page's v3 example, is not evidence of the supported v4 signature.
-
-Run lookup commands with network access. If a quota error occurs, report it and suggest `npx ctx7@latest login` or `CONTEXT7_API_KEY`. If a sandbox causes a network error, use the environment's permitted network-enabled execution path. Report an unavailable source instead of claiming compatibility from memory.
-
-## Verify against official source
-
-For this release, the official tag `effect@4.0.0-rc.112` resolves to commit `2600f62f4532026928454dcea8d1c48557b3f942`. Inspect the installed npm package's `src/` and declarations for the delivered API, and the tagged repository for migration guides, tests, and examples.
-
-Use a temporary source checkout or a verified local mirror. Verify its origin and revision before trusting it. A default-branch clone is not version matching. Avoid changing an existing checkout with unrelated work. Keep downloaded source outside product commits.
-
-```bash
-git clone --depth 1 --branch effect@4.0.0-rc.112 https://github.com/Effect-TS/effect.git /tmp/effect-rc112-source
-git -C /tmp/effect-rc112-source rev-parse HEAD
-rg 'export.*TaggedError|withDecodingDefaultType' /tmp/effect-rc112-source/packages/effect/src/Schema.ts
-```
-
-Choose an unused destination if that temporary directory exists. For other installed releases, resolve and verify their official tag or published source revision. If no matching source is available, state the gap and leave that version unverified.
+A docs CLI is optional for skills-only use. Use the host's available file and documentation tools under its network policy. Report lookup failures; for Context7 quota errors, follow its authentication guidance. A source mirror or cached release can satisfy the workflow without network access when its provenance and revision are verifiable.
 
 ## Evidence for this release
 
@@ -45,6 +28,7 @@ All links below identify the verified commit.
 | --- | --- |
 | Services and fiber-local values | [Service migration](https://github.com/Effect-TS/effect/blob/2600f62f4532026928454dcea8d1c48557b3f942/migration/services.md), [FiberRef migration](https://github.com/Effect-TS/effect/blob/2600f62f4532026928454dcea8d1c48557b3f942/migration/fiberref.md) |
 | Schemas, dates, defaults, redaction | [Schema migration](https://github.com/Effect-TS/effect/blob/2600f62f4532026928454dcea8d1c48557b3f942/migration/schema.md), [Schema source](https://github.com/Effect-TS/effect/blob/2600f62f4532026928454dcea8d1c48557b3f942/packages/effect/src/Schema.ts) |
+| Equality and hash keys | [Equality migration](https://github.com/Effect-TS/effect/blob/2600f62f4532026928454dcea8d1c48557b3f942/migration/equality.md), [Equal](https://github.com/Effect-TS/effect/blob/2600f62f4532026928454dcea8d1c48557b3f942/packages/effect/src/Equal.ts), [Hash](https://github.com/Effect-TS/effect/blob/2600f62f4532026928454dcea8d1c48557b3f942/packages/effect/src/Hash.ts) |
 | Forks and scopes | [Fork migration](https://github.com/Effect-TS/effect/blob/2600f62f4532026928454dcea8d1c48557b3f942/migration/forking.md), [Scope migration](https://github.com/Effect-TS/effect/blob/2600f62f4532026928454dcea8d1c48557b3f942/migration/scope.md) |
 | Child processes | [ChildProcess](https://github.com/Effect-TS/effect/blob/2600f62f4532026928454dcea8d1c48557b3f942/packages/effect/src/unstable/process/ChildProcess.ts), [ChildProcessSpawner](https://github.com/Effect-TS/effect/blob/2600f62f4532026928454dcea8d1c48557b3f942/packages/effect/src/unstable/process/ChildProcessSpawner.ts) |
 | HTTP requests, status, errors | [HTTP source directory](https://github.com/Effect-TS/effect/tree/2600f62f4532026928454dcea8d1c48557b3f942/packages/effect/src/unstable/http) |
@@ -55,6 +39,4 @@ All links below identify the verified commit.
 
 ## Example coverage
 
-`validation/check.mjs` extracts TypeScript fences and compiles complete examples and grouped worked examples against exact dependencies. It also executes the actual scaffold generators and compiles their output. Each fence has a check marker or an explicit illustrative-fragment label. Unclassified fences fail validation.
-
-A complete module can still require a runtime service or platform at its application boundary. Typechecking does not imply that a network call, Bun runtime, or application placeholder has run. Consult `validation/README.md` for reproducible checks and the runtime tests performed.
+For maintenance checks, fence markers, runtime coverage, and host limits, read `validation/README.md` in the full repository. Compilation verifies signatures; it does not establish that a network call, runtime, or application placeholder has run.

@@ -1,11 +1,13 @@
 import { expect, it } from "@effect/vitest"
-import { Config, ConfigProvider, Deferred, Effect, Exit, Fiber, FileSystem, Layer, PlatformError, Redacted, Schema } from "effect"
+import { Config, ConfigProvider, Deferred, Effect, Equal, Exit, Fiber, FileSystem, Hash, HashMap, Layer, Option, PlatformError, Redacted, Schema } from "effect"
 import { NodeServices } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
-import { Config as Defaults } from "./generated/schema-struct"
+import { Config as Defaults, Limits } from "./generated/schema-struct"
 import { User } from "./generated/model-user"
 import { ExampleFromJson } from "./generated/generateSchemaScaffold"
-import { UserId } from "./generated/schema-brands"
+import { ExternalId, UserId } from "./generated/schema-brands"
+import { RunnerAddress } from "./generated/schema-class"
+import { Queued, QueueResult } from "./generated/schema-tagged"
 import { ApiConfig } from "./generated/config-service"
 import { Port } from "./generated/config-schema"
 import { GitHubApi } from "./generated/http-service"
@@ -31,6 +33,32 @@ it.effect("branded IDs enforce their pattern", () => Effect.gen(function* () {
   expect(yield* Schema.decodeUnknownEffect(UserId)("usr_a123")).toBe("usr_a123")
   expect(Exit.isFailure(yield* Effect.exit(Schema.decodeUnknownEffect(UserId)("bad")))).toBe(true)
 }))
+
+it.effect("nominal brands retain the base string contract", () => Effect.gen(function* () {
+  expect(ExternalId.make("")).toBe("")
+  expect(yield* Schema.decodeUnknownEffect(ExternalId)("opaque value")).toBe("opaque value")
+  expect(Exit.isFailure(yield* Effect.exit(Schema.decodeUnknownEffect(ExternalId)(123)))).toBe(true)
+}))
+
+it.effect("tagged structs construct tags and decode a plain record union", () => Effect.gen(function* () {
+  expect(Queued.make({ recordId: Queued.fields.recordId.make("record-1") })).toEqual({ _tag: "Queued", recordId: "record-1" })
+  expect(yield* Schema.decodeUnknownEffect(QueueResult)({ _tag: "Rejected", reason: "full" })).toEqual({ _tag: "Rejected", reason: "full" })
+  expect(Exit.isFailure(yield* Effect.exit(Schema.decodeUnknownEffect(Queued)({ recordId: "record-1" })))).toBe(true)
+}))
+
+it("plain schema records and custom class keys obey equality and hashing", () => {
+  const first = Limits.make({ steps: 1, rows: 2, bytes: 3 })
+  const equal = Limits.make({ steps: 1, rows: 2, bytes: 3 })
+  expect(Equal.equals(first, equal)).toBe(true)
+  expect(Hash.hash(first)).toBe(Hash.hash(equal))
+  expect(HashMap.get(HashMap.make([first, "found"]), equal)).toEqual(Option.some("found"))
+  const address = new RunnerAddress({ host: "localhost", port: 8080 })
+  const sameAddress = new RunnerAddress({ host: "localhost", port: 8080 })
+  expect(Equal.equals(address, sameAddress)).toBe(true)
+  expect(Hash.hash(address)).toBe(Hash.hash(sameAddress))
+  expect(Equal.equals(address, new RunnerAddress({ host: "localhost", port: 8081 }))).toBe(false)
+  expect(address.endpoint).toBe("localhost:8080")
+})
 
 it.effect("Date model round trips through JSON with an ISO string", () => Effect.gen(function* () {
   const json = Schema.fromJsonString(User)

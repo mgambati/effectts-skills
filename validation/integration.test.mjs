@@ -44,9 +44,12 @@ it("session hook routes v3 and unresolved installations to version guidance", ()
   for (const version of ["3.19.0", "4.0.0-rc.113", undefined]) {
     const result = hook("session-start.mjs", project(version));
     expect(result.hookSpecificOutput.additionalContext).toContain("use matching official source and docs");
-    expect(result.hookSpecificOutput.additionalContext).not.toContain("class Users");
+    expect(result.hookSpecificOutput.additionalContext).not.toContain("## Shared workflow");
   }
-  expect(hook("session-start.mjs", project("4.0.0-rc.112")).hookSpecificOutput.additionalContext).toContain("Context.Service");
+  const supported = hook("session-start.mjs", project("4.0.0-rc.112")).hookSpecificOutput.additionalContext;
+  expect(supported).toContain("## Shared workflow");
+  expect(supported).toContain("references/services-and-layers.md");
+  expect(supported).not.toContain("name: effect-ts");
 });
 
 it("read hook recognizes v4 services and processes and declines v3 injection", () => {

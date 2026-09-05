@@ -14,7 +14,7 @@ try {
     });
   }
   symlinkSync(join(root, "validation/node_modules"), join(copy, "validation/node_modules"), "dir");
-  const skill = join(copy, "skills/effect-ts/SKILL.md");
+  const skill = join(copy, "skills/effect-ts/references/services-and-layers.md");
   const original = readFileSync(skill, "utf8");
   const invalid = original.replace('import { Context, Effect, Layer, Schema } from "effect"',
     'import { Context, Effect, Layer, Schema, InvalidEffectApi } from "effect"');

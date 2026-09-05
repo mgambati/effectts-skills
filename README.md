@@ -1,82 +1,71 @@
-# Effect-TS plugin for Pi
+# Effect skills and host integrations
 
-[Effect](https://effect.website) v4 skills and context injection for [pi](https://github.com/badlogic/pi-mono). Detects Effect projects, injects relevant patterns when you're reading Effect code, and provides scaffold tools and slash commands.
+The [effect-ts skill](skills/effect-ts/SKILL.md) guides implementation and review with the TypeScript Effect library. It resolves the consuming version, reads matching source, and selects topic references. The examples target the release in [version compatibility](skills/effect-ts/references/version-compatibility.md). Other releases require their own API checks.
 
-Supported release: **Effect 4.0.0-rc.112**. See [version compatibility and official sources](skills/effect-ts/references/version-compatibility.md) and [validation](validation/README.md). Other releases require matching documentation and API checks before using these patterns.
+## Skills-only installation
 
-## Install
+From a checkout of the revision you want to use:
 
 ```bash
-# Pi (extension + skills)
-pi install https://github.com/joelhooks/effectts-skills
-
-# Claude Code (plugin + skills)
-npx plugins add joelhooks/effectts-skills
-
-# Just the skills (any agent)
-npx skills add joelhooks/effectts-skills
+npx skills add . --skill effect-ts
 ```
 
-## What It Does
+Choose your agent and installation scope in the installer. See the [skills CLI documentation](https://github.com/vercel-labs/skills) for supported agents and options. For manual installation, copy the entire `skills/effect-ts` directory to the host's documented skill location, including `references/`.
 
-### Smart Context Injection
+This installs instructions and references. It adds no executable tools, hooks, or status bar. The agent uses its existing file, shell, and documentation capabilities. Explicit invocation syntax and automatic selection depend on the host.
 
-The extension resolves the consuming package's installed Effect version and:
+## Pi integration
 
-- Shows the resolved installed Effect version in the status bar
-- Detects Effect patterns in files you read (services, schemas, errors, testing, HTTP, CLI, etc.)
-- Appends reference hints for the supported release
-- Routes v3, unsupported releases, and unresolved installations to version guidance
-- Generates scaffolds only when the installed Effect version matches the supported release
+From this repository's root:
 
-### Commands
+```bash
+pi install .
+```
 
-| Command | Description |
-|---------|-------------|
-| `/effect:docs <topic>` | Load a specific reference doc into context |
-| `/effect:service <Name>` | Generate a service scaffold with layer and test layer |
-| `/effect:test <Name>` | Generate a test scaffold with @effect/vitest |
+Pi loads the extension and skills through the `pi` paths in [package.json](package.json). See [Pi package installation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/packages.md) for scope and remote-source options.
 
-**Available topics:** services, layers, data-modeling, schema, errors, testing, http, cli, config, processes, setup, version
+The extension reports the installed Effect version and suggests a topic reference after a matching file read. It provides documentation commands and scaffold generation:
 
-### Tools (LLM-callable)
+| Pi entry | Capability |
+| --- | --- |
+| `/effect:docs <topic>` | Load a reference. Call without a topic to discover the current topic list. |
+| `/effect:service <Name>` | Produce a service scaffold with implementation placeholders. |
+| `/effect:test <Name>` | Produce a test scaffold with application tests marked as skipped. |
+| `effect_docs` | Agent-callable reference lookup. |
+| `effect_scaffold` | Agent-callable service, schema, error, or test scaffold generation. |
 
-| Tool | Description |
-|------|-------------|
-| `effect_scaffold` | Generate Effect v4 boilerplate (service, schema, error, test) |
-| `effect_docs` | Load Effect reference docs on a specific topic |
+The extension's registrations own the command and topic lists. Scaffolds require the supported installed Effect release. Generated code still needs the consuming application's implementation and tests.
 
-### Skills
+## Claude Code integration
 
-The full `effect-ts` skill with progressive disclosure:
+Load the checkout as a local plugin when launching Claude Code in the consuming project:
 
-| Reference | Topics |
-|-----------|--------|
-| `SKILL.md` | Core patterns: Context.Service, Effect.fn/gen, Schema.Class, TaggedError, Layer composition |
-| `services-and-layers.md` | Service-driven development, test layers, memoization, provide vs provideMerge |
-| `data-modeling.md` | Schema.Class, branded types, variants, Match.valueTags, JSON encoding |
-| `schema-decisions.md` | Class vs Struct vs TaggedClass decision flowchart, migration patterns |
-| `error-handling.md` | TaggedError, yieldable errors, catch/catchTag/catchTags, TypeId/refail |
-| `testing.md` | @effect/vitest, it.effect/live/layer, TestClock, Context.Reference overrides, worked example |
-| `http-clients.md` | effect/unstable/http, requests, responses, middleware, retries, typed API service |
-| `cli.md` | effect/unstable/cli, Arguments, Flags, subcommands, task manager example |
-| `config.md` | Config service pattern, schema validation, ConfigProvider, Redacted secrets |
-| `processes.md` | Fork types, Scope.provide, ChildProcess and ChildProcessSpawner, killable tasks |
-| `version-compatibility.md` | Installed version detection, matching source and docs, supported dependency set |
-| `setup.md` | tsconfig, Effect Language Service, module settings, dev workflow |
+```bash
+claude --plugin-dir /path/to/effectts-skills
+```
+
+Replace the path with your checkout. Current Claude Code supports component discovery from default directories without a manifest. This repository contains skills and [hook configuration](hooks/hooks.json), but no marketplace manifest. See [Claude Code's local plugin documentation](https://code.claude.com/docs/en/plugins#test-your-plugins-locally) for loading and distribution options.
+
+SessionStart supplies the shared workflow for the supported installed Effect release. PreToolUse supplies a matching topic reference for existing TypeScript files on Read, Edit, or Write. SessionEnd clears session deduplication state. A new file with no existing content may produce no topic match. These hooks do not register the Pi commands or scaffold tools.
+
+## Version detection and limits
+
+The host integrations resolve installed Effect metadata near the consuming package. Unsupported or unresolved installations receive version guidance. Detection handles ordinary node_modules layouts, hoisting, and symlinks; layouts without node_modules remain unresolved. Companion compatibility still needs the skill's version workflow.
+
+Host pattern detection is heuristic. A matching identifier in an Effect package can belong to another library, and an alias can hide an Effect API. Confirm the import and requested behavior before applying a suggested reference.
+
+The [skill entry point](skills/effect-ts/SKILL.md#select-a-reference) owns topic selection. It links to service composition, schema decisions and encoding, errors, testing, HTTP, CLI, config, process lifetimes, and setup guidance.
 
 ## Validation
 
-Run `npm run validate` from the repository root. It installs the pinned validation dependencies, proves an invalid documentation import fails, checks all TypeScript examples and generated scaffolds, and runs the behavior tests. See [coverage and host limits](validation/README.md).
+Use the validation script declared in [package.json](package.json). The [validation guide](validation/README.md) describes API checks, executable behavior, integration simulations, and manual invocation review. Live Pi and Claude Code loading and delivery remain unverified; simulated registration and hook subprocess tests do not establish those host behaviors.
 
-## Sources
+## Attribution
 
-The original patterns came from these repositories. The compatibility pass verifies APIs against the official pinned source linked above:
+This repository builds on [joelhooks/effectts-skills](https://github.com/joelhooks/effectts-skills). Its original patterns draw from:
 
-- **[kitlangton/effect-solutions](https://github.com/kitlangton/effect-solutions)** - Effect best practices by [Kit Langton](https://github.com/kitlangton). Background patterns. Also at [effect.solutions](https://effect.solutions).
-- **[effect-ts/effect](https://github.com/effect-ts/effect)** - Official Effect source.
-- **[artimath/effect-skills](https://github.com/artimath/effect-skills)** (MIT) - Schema decision matrix, process/scope patterns, layer gotchas, TypeId/refail, Context.Reference overrides.
+- [kitlangton/effect-solutions](https://github.com/kitlangton/effect-solutions), by Kit Langton, also published at [effect.solutions](https://effect.solutions).
+- [Effect-TS/effect](https://github.com/Effect-TS/effect), the official source used for version-specific API verification.
+- [artimath/effect-skills](https://github.com/artimath/effect-skills), MIT, for schema decisions, process and scope patterns, layer behavior, and error and test techniques.
 
-## License
-
-MIT
+The package declares the MIT license.

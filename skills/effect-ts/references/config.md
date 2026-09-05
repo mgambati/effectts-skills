@@ -46,7 +46,7 @@ Effect.runPromise(program.pipe(Effect.provide(testConfigLayer)))
 
 ## Config Service Pattern
 
-**Best practice:** Create a config service with `layer` and `testLayer`:
+Use a config service when several operations share validated startup settings or tests need to replace those settings together. Direct Config reads remain suitable for a small operation or values intentionally resolved on each run:
 
 <!-- check: config-service -->
 ```typescript
@@ -83,13 +83,7 @@ export class ApiConfig extends Context.Service<
 }
 ```
 
-**Why this pattern:**
-- Separates config loading from business logic
-- Easy to swap implementations (layer vs testLayer)
-- Config errors caught early at layer composition
-- Type-safe throughout your app
-
-For tests, just `Layer.succeed` with hardcoded values. Use `ConfigProvider.fromUnknown` when testing config parsing itself.
+Use `Layer.succeed` with fixed values when testing consumers of the config service. Use `ConfigProvider.fromUnknown` when testing config parsing itself.
 
 ## Config Primitives
 
@@ -163,7 +157,7 @@ ConfigProvider.layer(ConfigProvider.fromEnv().pipe(ConfigProvider.nested("APP"))
 
 ## Redacted Secrets
 
-Always use `Config.redacted()` for sensitive values:
+Use `Config.redacted` for secret strings, or `Config.schema` with a Redacted schema when the secret needs another parser. Redaction hides the wrapped value in normal logging; extract it only where the consumer needs the raw secret:
 
 <!-- check: config-redacted -->
 ```typescript

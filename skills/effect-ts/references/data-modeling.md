@@ -1,28 +1,14 @@
-# Data Modeling
+# Data modeling
 
-## Table of Contents
+## Schema boundaries
 
-- [Why Schema](#why-schema)
-- [Records (AND Types)](#records-and-types)
-- [Variants (OR Types)](#variants-or-types)
-- [Branded Types](#branded-types)
-- [JSON Encoding and Decoding](#json-encoding-and-decoding)
-- [Common Schema Primitives](#common-schema-primitives)
+Use a schema when the task needs runtime decoding, encoding, or a type derived from that boundary contract. Existing TypeScript types can remain for internal data with no such requirement.
 
-## Why Schema
+Read [Schema decisions](schema-decisions.md) before choosing a representation or adding brands and constraints. This reference demonstrates fields, matching, and encoding after that decision.
 
-- **Single source of truth**: define once, get TypeScript types + runtime validation + JSON serialization
-- **Parse safely**: validate HTTP/CLI/config data with detailed errors
-- **Rich domain types**: branded primitives prevent confusion, classes add methods
-- **Ecosystem integration**: same schema everywhere (RPC, HttpApi, CLI, frontend, backend)
+## Records
 
-All representable data composes from two primitives:
-- **Records** (AND): a User has a name AND an email AND a createdAt
-- **Variants** (OR): a Result is a Success OR a Failure
-
-## Records (AND Types)
-
-Use `Schema.Class` for composite data models:
+This class has a computed `displayName` and a Date field decoded from an ISO string:
 
 <!-- check: model-user -->
 ```typescript
@@ -50,7 +36,7 @@ const user = new User({
 })
 ```
 
-## Variants (OR Types)
+## Variants
 
 Simple string/number alternatives with `Schema.Literals`:
 
@@ -62,7 +48,7 @@ const Status = Schema.Literals(["pending", "active", "completed"])
 type Status = typeof Status.Type // "pending" | "active" | "completed"
 ```
 
-Structured variants with `Schema.TaggedClass` + `Schema.Union`:
+This class-based variant example uses `Schema.TaggedClass` and `Schema.Union`:
 
 <!-- check: model-variants -->
 ```typescript
@@ -87,9 +73,9 @@ const renderResult = (result: Result) =>
   })
 ```
 
-## Branded Types
+## Branded fields
 
-Brand nearly all primitives with semantic meaning. Not just IDs, but emails, URLs, counts, ports, slugs:
+Read [Nominal brands and runtime validation](schema-decisions.md#nominal-brands-and-runtime-validation) for the decision rule. In this example, UserId and PostId distinguish opaque strings; Email is nominal only. Port also has a range check:
 
 <!-- check: model-brands -->
 ```typescript
@@ -102,7 +88,7 @@ type UserId = typeof UserId.Type
 const PostId = Schema.String.pipe(Schema.brand("PostId"))
 type PostId = typeof PostId.Type
 
-// Domain primitives
+// Email has no format validation in this example.
 const Email = Schema.String.pipe(Schema.brand("Email"))
 type Email = typeof Email.Type
 
@@ -112,7 +98,7 @@ const Port = Schema.Int.pipe(
 )
 type Port = typeof Port.Type
 
-// Usage: impossible to mix types
+// Typed calls distinguish brands; assertions can bypass the compiler.
 const userId = UserId.make("user-123")
 const postId = PostId.make("post-456")
 
@@ -120,7 +106,7 @@ function getUser(id: UserId) { /* ... */ }
 // getUser(postId) // Type error: can't pass PostId where UserId expected
 ```
 
-## JSON Encoding and Decoding
+## JSON encoding and decoding
 
 Use `Schema.fromJsonString` to combine JSON.parse + schema decoding in one step:
 
@@ -148,7 +134,7 @@ const program = Effect.gen(function* () {
 
 Use the `FromJson` schema (not the base schema) for both decode and encode when working with JSON strings.
 
-## Common Schema Primitives
+## Common schema fields
 
 | Schema | TypeScript Type | Notes |
 |--------|----------------|-------|
@@ -167,7 +153,7 @@ Use the `FromJson` schema (not the base schema) for both decode and encode when 
 | `Schema.Redacted(S)` | `Redacted<T>` | Hidden in logs |
 | `Schema.Defect()` | `unknown` | Wraps unknown errors |
 
-### Validation Combinators
+### Validation combinators
 
 Illustrative fragment. Import Schema from effect.
 

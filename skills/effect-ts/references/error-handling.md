@@ -10,7 +10,7 @@
 
 ## Schema.TaggedError
 
-Define domain errors with `Schema.TaggedError`:
+Use `Schema.TaggedError` when an error needs schema decoding or encoding and tagged recovery. Existing typed errors can remain when they already provide the required recovery contract:
 
 <!-- check: errors-domain -->
 ```typescript
@@ -42,11 +42,11 @@ type AppError = typeof AppError.Type
 - Custom methods via class extension
 - Sensible default `message` when you don't declare one
 
-**Every distinct failure reason deserves its own error type.** Don't collapse multiple failure modes into generic errors like `NotFoundError`. Use `UserNotFoundError`, `ChannelNotFoundError`, etc. with relevant context fields.
+Split error tags when callers need different recovery, reporting, or payloads. A shared `NotFoundError` with a resource field is sufficient when callers handle missing resources uniformly. Preserve useful provider errors or map them at the boundary where the public contract changes.
 
 ## Yieldable Errors
 
-`Schema.TaggedError` values are yieldable. Return them directly in generators without wrapping in `Effect.fail`:
+`Schema.TaggedError` values are yieldable. Yield them directly in generators or use `Effect.fail` where explicit failure construction fits the surrounding code:
 
 <!-- check: errors-yield -->
 ```typescript
@@ -128,7 +128,7 @@ Effect tracks errors in the type system (`Effect<A, E, R>`) so callers know what
 
 **Use typed errors** for domain failures the caller can handle: validation errors, "not found", permission denied, rate limits.
 
-**Use defects** for unrecoverable situations: bugs, invariant violations. Defects terminate the fiber and you handle them once at the system boundary (logging, crash reporting).
+Use defects for bugs and violated invariants. Report them at a boundary that owns the failed computation. A startup program may deliberately convert a configuration failure to a defect when it cannot continue:
 
 Illustrative fragment. loadConfig returns an Effect with a port field; import Effect.
 
@@ -141,7 +141,7 @@ const main = Effect.gen(function* () {
 })
 ```
 
-**When to catch defects:** Almost never. Only at system boundaries for logging/diagnostics. Use `Effect.exit` to inspect or `Effect.catchDefect` if you must recover (e.g., plugin sandboxing).
+Use `Effect.exit` to inspect the full outcome. Recover with `Effect.catchDefect` when the boundary can isolate the failure and continue safely, such as an independent plugin task. Keep that recovery policy explicit.
 
 ## Schema.Defect() for Unknown Errors
 

@@ -9,10 +9,11 @@
 - [Providing Layers](#providing-layers)
 - [Layer Memoization](#layer-memoization)
 - [Sharing Layers Between Tests](#sharing-layers-between-tests)
+- [Service lookup with recovery](#service-lookup-with-recovery)
 
 ## Context.Service
 
-Define services with `Context.Service` as a class declaring a unique identifier and typed interface:
+Use a service when callers need a replaceable dependency or shared resource. Pure functions and explicit parameters remain suitable for local computations. The examples declare tags with `Context.Service`:
 
 <!-- check: services-tags -->
 ```typescript
@@ -34,10 +35,11 @@ class Logger extends Context.Service<
 >()("@app/Logger") {}
 ```
 
-**Rules:**
-- Tag identifiers must be unique. Use `@app/ServiceName` or `@path/to/ServiceName`
-- Service methods should have no dependencies (`R = never`). Dependencies are handled via Layer composition
-- Use `readonly` properties
+Keep identifiers unique among distinct services sharing a context, for example `@app/ServiceName`. Follow the repository's naming and mutability conventions.
+
+Capture stable dependencies during layer construction when methods should be self-contained. A method may retain an environment requirement when the caller owns it, such as a request-specific service or `Scope`. Declare those requirements and the errors the implementation can return.
+
+Use `Effect.gen` for sequential dependent operations. Named `Effect.fn` functions add tracing to operations that need it; direct combinators are suitable for small compositions.
 
 ## Layer Implementations
 
@@ -100,11 +102,11 @@ export class Users extends Context.Service<
 }
 ```
 
-**Layer naming:** camelCase with descriptive suffix: `layer`, `testLayer`, `postgresLayer`, `sqliteLayer`.
+The examples use static `layer` and `testLayer` members. Separate exported layers and other repository naming conventions work too.
 
 ## Service-Driven Development
 
-Sketch leaf service tags first (no implementations). This lets you write and type-check higher-level orchestration before leaf services are runnable:
+When designing orchestration around agreed contracts, sketch leaf service tags first. For an uncertain external API, implement a small integration first to establish the contract. This example demonstrates the contract-first approach:
 
 <!-- check: services-events -->
 ```typescript
@@ -192,7 +194,7 @@ This code compiles and type-checks even though leaf services have no implementat
 
 ## Test Implementations
 
-Use `Layer.sync` with in-memory state for test layers. Mutable state is fine in tests (JS is single-threaded):
+Allocate in-memory test state inside `Layer.sync` so each layer build owns its state. Keep mutations synchronous or coordinate concurrent read-modify-write operations explicitly:
 
 <!-- check: services-test -->
 ```typescript
@@ -218,7 +220,7 @@ class Database extends Context.Service<
 
 ## Providing Layers
 
-Provide once at the app entry point. Do not scatter `Effect.provide` calls:
+Compose long-lived application dependencies at the entry point so their lifetimes and sharing are visible. Provide locally for tests, request scopes, overrides, or intentionally isolated resources:
 
 Illustrative fragment. Composition sketch with application-owned layers and service contracts.
 
@@ -244,15 +246,9 @@ const main = program.pipe(Effect.provide(appLayer))
 Effect.runPromise(main)
 ```
 
-**Why provide once:**
-- Clear dependency graph in one place
-- Easy testing: swap `appLayer` for `testLayer`
-- No hidden dependencies
-- Simpler refactoring
-
 ## Layer.provide vs Layer.provideMerge vs Layer.mergeAll
 
-This causes most Effect type errors. Know the difference:
+Choose whether the consumer also needs the provider in its output context:
 
 | Method | Deps Satisfied | Available to Program | Use When |
 |--------|---------------|---------------------|----------|
@@ -285,14 +281,14 @@ This means `SomeService` is still required. Provide its layer at the boundary. U
 
 ## Layer Memoization
 
-Effect memoizes layers by reference identity. The same layer instance used multiple times is constructed only once.
+Within a shared layer build and memo map, Effect memoizes by layer reference identity. Separate builds can allocate separate resources even when they use the same layer value.
 
 Illustrative fragment. Supply Postgres, UserRepo and OrderRepo and import Layer.
 
 <!-- fragment: Supply Postgres, UserRepo and OrderRepo and import Layer. -->
 ```typescript
-// BAD: calling constructor twice creates two connection pools
-const badLayer = Layer.merge(
+// Separate instances: use when each consumer needs its own pool
+const separatePools = Layer.merge(
   UserRepo.layer.pipe(
     Layer.provide(Postgres.layer({ url: "postgres://...", poolSize: 10 }))
   ),
@@ -301,28 +297,26 @@ const badLayer = Layer.merge(
   )
 )
 
-// GOOD: store in a constant, same reference shared
+// Shared instance: use when both consumers should share a pool
 const postgresLayer = Postgres.layer({ url: "postgres://...", poolSize: 10 })
 
-const goodLayer = Layer.merge(
+const sharedPool = Layer.merge(
   UserRepo.layer.pipe(Layer.provide(postgresLayer)),
   OrderRepo.layer.pipe(Layer.provide(postgresLayer)) // same ref
 )
 ```
 
-**Rule:** When using parameterized layer constructors, always store the result in a module-level constant.
+Bind a parameterized layer once in the scope that should share it. Use module scope for a stable application dependency, or a request/factory scope for dynamic configuration and isolation. Construct separate instances when separate resources are intended.
 
 ## Sharing Layers Between Tests
 
-Default: provide a fresh layer per `it.effect` so state never leaks.
-
-Use `it.layer` only for expensive shared resources (database connections):
+Read [Testing](testing.md#providing-layers) when choosing test isolation or suite-level sharing. These examples show the two provisioning forms:
 
 Illustrative fragment. Supply a Counter service and layer with get returning Effect<number>; import Effect and test helpers.
 
 <!-- fragment: Supply a Counter service and layer with get returning Effect<number>; import Effect and test helpers. -->
 ```typescript
-// Preferred: fresh layer per test
+// A separate build per test
 it.effect("starts at zero", () =>
   Effect.gen(function* () {
     const counter = yield* Counter
@@ -330,7 +324,7 @@ it.effect("starts at zero", () =>
   }).pipe(Effect.provide(Counter.layer))
 )
 
-// Shared: only when you need it
+// One suite-owned build
 it.layer(Counter.layer)("counter", (it) => {
   it.effect("starts at zero", () =>
     Effect.gen(function* () {
@@ -342,3 +336,49 @@ it.layer(Counter.layer)("counter", (it) => {
 ```
 
 See [testing.md](testing.md) for the full worked example.
+
+## Service lookup with recovery
+
+This complete example uses a class constructor for the fallback record and an in-memory layer for lookup.
+
+<!-- check: core-service -->
+```typescript
+import { Context, Effect, Layer, Schema } from "effect"
+
+const UserId = Schema.NonEmptyString.pipe(Schema.brand("UserId"))
+type UserId = typeof UserId.Type
+
+class User extends Schema.Class<User>("User")({
+  id: UserId,
+  name: Schema.String,
+}) {}
+
+class UserNotFound extends Schema.TaggedError<UserNotFound>()(
+  "UserNotFound", { id: UserId }
+) {}
+
+class Users extends Context.Service<Users, {
+  readonly findById: (id: UserId) => Effect.Effect<User, UserNotFound>
+}>()("@app/Users") {
+  static readonly testLayer = Layer.sync(Users, () => {
+    const records = new Map<UserId, User>()
+    return {
+      findById: Effect.fn("Users.findById")(function* (id: UserId) {
+        const user = records.get(id)
+        if (!user) return yield* new UserNotFound({ id })
+        return user
+      }),
+    }
+  })
+}
+
+const program = Effect.gen(function* () {
+  const users = yield* Users
+  return yield* users.findById(UserId.make("user-123"))
+}).pipe(
+  Effect.catchTag("UserNotFound", (error) =>
+    Effect.succeed(new User({ id: error.id, name: "Unknown" }))
+  ),
+  Effect.provide(Users.testLayer),
+)
+```

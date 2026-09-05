@@ -13,11 +13,7 @@
 
 ## Setup
 
-Install:
-
-```bash
-bun add -D --exact vitest@4.1.11 @effect/vitest@4.0.0-rc.112
-```
+Read the consuming manifest and lockfile for the test runner and dependency versions. Add @effect/vitest only when the task requires its Effect test helpers, using the project's package manager and compatible peer dependencies. For the dependency set checked here, read `validation/package.json` in the full repository.
 
 Config:
 
@@ -31,19 +27,9 @@ export default defineConfig({
 })
 ```
 
-```json
-// package.json
-{
-  "scripts": {
-    "test": "vitest run",
-    "test:watch": "vitest"
-  }
-}
-```
-
 ## Basic Testing
 
-Import from `@effect/vitest`, not `vitest`:
+Import Effect-specific test helpers from `@effect/vitest`. Ordinary Vitest tests and utilities remain appropriate for code that does not need those helpers:
 
 <!-- check: testing-basic -->
 ```typescript
@@ -133,7 +119,9 @@ it.effect("temp directory cleaned up", () =>
 
 ## Providing Layers
 
-Use `Effect.provide` inline per test:
+Build layers per test when mutable state must start fresh. For state allocation, read [Test implementations](services-and-layers.md#test-implementations). Use `it.layer` for intentional suite-level sharing, such as an expensive database or an immutable fixture. Reset shared mutable state between tests when assertions require isolation.
+
+This test provides a fixed database implementation locally:
 
 Illustrative fragment. Supply Database service with query returning Effect<readonly string[]> and the test imports.
 
@@ -449,13 +437,4 @@ it.effect("uses an isolated override", () =>
     expect(yield* ConfigOverride).toBeUndefined()
   })
 )
-```
-
-## Running Tests
-
-```bash
-bun run test                          # all tests
-bun run test:watch                    # watch mode
-bunx vitest run tests/user.test.ts    # specific file
-bunx vitest run -t "UserService"      # matching pattern
 ```

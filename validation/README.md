@@ -14,9 +14,9 @@ The API repair established Effect `4.0.0-rc.112`. This setup retains its exact E
 
 The checker reads every TypeScript fence in `skills/effect-ts/SKILL.md` and its references. Complete examples compile with their published imports. The task manager, config basics and event tests group their marked blocks into modules; repeated named imports merge without dropping API names.
 
-All 83 blocks compile, including 51 complete or grouped blocks and 32 illustrative fragments. [coverage.md](coverage.md) lists the counts and each fragment's runtime exclusion reason. Fragments retain their published Effect calls and receive missing application types or generator wrappers from `fragments.mjs`. They are compatibility checks, not runnable applications.
+The [generated coverage report](coverage.md) lists complete or grouped examples, illustrative fragments, and each fragment's runtime exclusion reason. Fragments retain their published Effect calls and receive missing application types or generator wrappers from `fragments.mjs`. They are compatibility checks, not runnable applications.
 
-Unclassified fences, accidental duplicate IDs, stale fragment fixtures and stale coverage reports fail the check. When editing a fence, keep its `check` ID or its concrete `fragment` reason immediately above it. After adding or moving examples, inspect the coverage changes produced by `npm --prefix validation run coverage:update`, then rerun validation. New runtime suites also need an entry in `vitest.config.ts`.
+Unclassified fences, accidental duplicate IDs, stale fragment fixtures and stale coverage reports fail the check. When editing a fence, keep its `check` ID or its concrete `fragment` reason immediately above it. After adding or moving examples, inspect the coverage changes produced by the `coverage:update` script in the validation manifest, then rerun validation. New runtime suites also need an entry in `vitest.config.ts`.
 
 The checker regenerates ignored files in `validation/generated/`. `inventory.json` maps modules to source lines. TypeScript uses strict mode and exact optional property types. Library declarations use `skipLibCheck`; example errors have no suppression. `allowOnly: false` rejects accidentally focused runtime tests. The illustrative test-modifier fragment compiles but never runs.
 
@@ -27,7 +27,7 @@ Tests import extracted documentation modules. Seven published testing suites run
 | Area | Executed behavior |
 | --- | --- |
 | Services and layers | HTTP service provisioning, event orchestration, independent user/email stores and ticket counters across tests |
-| Schemas and errors | Defaults, branded constraints, Date JSON round trips, tagged error decoding and recovery |
+| Schemas and errors | Defaults, nominal brands and validated constraints, tagged structs, structural record keys and custom equality, Date JSON round trips, tagged error decoding and recovery |
 | HTTP | Success, schema rejection, 404 mapping, other status failures and transport failures through supplied fetch implementations |
 | CLI | Published task repository and command handlers, argument and flag parsing, omitted boolean defaults, invalid input, persistence, toggling and corrupt-file errors |
 | Config | Parsing, missing-only defaults, redaction, arrays and environment prefixes |
@@ -46,6 +46,10 @@ Pi deduplicates by reference file, so `services` and `layers` share a claim. Ver
 
 ## Failure proof and limits
 
-`npm --prefix validation run prove:failure` copies the validation inputs into a temporary directory and inserts `InvalidEffectApi` into the published core-service import. It requires checker exit code 1 and TypeScript diagnostic TS2305 for that import. It deletes the copy afterward. The main command then checks the correct working files and runs the tests.
+The `prove:failure` script in the validation manifest copies the validation inputs into a temporary directory and inserts `InvalidEffectApi` into the published core-service import in the services reference. It requires checker exit code 1 and TypeScript diagnostic TS2305 for that import. It deletes the copy afterward. The main command then checks the correct working files and runs the tests.
 
 Bun entry points compile but do not run under Bun. HTTP tests use local responses and make no external requests. Pi rendering, SDK type compatibility and callback delivery in a real Pi session remain unverified. Claude hook discovery and context delivery in a real Claude Code session also remain unverified. The mocked registration and subprocess tests do not establish those host behaviors. The GitHub workflow has been added but has not run on GitHub in this slice. Compatibility with other Effect releases and the optional Effect language service is outside this check.
+
+## Instruction review
+
+[Invocation examples](invocations.md) records a manual review of triggering and reference selection. It includes unrelated libraries, schema alternatives, resource ownership, version mismatches, and skills-only use. These are reasoning checks against the published instructions, not live agent invocation tests.

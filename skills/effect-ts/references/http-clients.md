@@ -200,6 +200,23 @@ const ResilientClient = Layer.effect(
 ).pipe(Layer.provide(FetchHttpClient.layer))
 ```
 
+### Operation tracing and timeout placement
+
+Select retryable failures and confirm the operation is safe to repeat. Here, a failed fetch is retried up to three times, and the outer timeout bounds the whole operation to five seconds. Put a timeout inside the retried operation when each attempt needs its own budget. Native fetch resolves for non-2xx responses; use the status handling above when those responses should fail.
+
+<!-- check: core-instrumentation -->
+```typescript
+import { Effect, Schedule } from "effect"
+
+const fetchWithRetry = Effect.fn("fetchWithRetry")(
+  function* (url: string) {
+    return yield* Effect.tryPromise(() => fetch(url).then((r) => r.text()))
+  },
+  Effect.retry(Schedule.max([Schedule.exponential("100 millis"), Schedule.recurs(3)])),
+  Effect.timeout("5 seconds"),
+)
+```
+
 ## Worked Example: Typed API Service
 
 <!-- check: http-service -->

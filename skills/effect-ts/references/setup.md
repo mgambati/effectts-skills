@@ -1,162 +1,21 @@
-# Project Setup
+# Project setup
 
-## Table of Contents
+## Preserve the consuming toolchain
 
-- [Effect Language Service](#effect-language-service)
-- [TypeScript Configuration](#typescript-configuration)
-- [Module Settings by Project Type](#module-settings-by-project-type)
-- [Reference Repositories](#reference-repositories)
-- [Development Workflow](#development-workflow)
+Read the owning manifest, lockfile, TypeScript configuration, and build scripts before changing setup. Use the project's package manager and test runner. Choose dependencies through [version compatibility](version-compatibility.md), including companion peer ranges.
 
-## Effect Language Service
+## Module configuration
 
-The Effect Language Service provides editor diagnostics and compile-time type checking. It catches errors TypeScript alone cannot detect.
+Choose settings for the runtime and build pipeline that will execute the code. Effect does not require every project to use the same tsconfig.
 
-### Install
+- Bundled applications should follow the bundler's supported module and resolution settings. Preserve a working configuration unless the requested change requires an adjustment.
+- Code emitted by TypeScript for Node should use settings matching the targeted Node module semantics. For NodeNext ESM, coordinate the owning package's `type` field and relative import extensions.
+- Libraries should account for their published JavaScript and declaration consumers. Declaration output, project references, and composite builds depend on that packaging plan.
 
-```bash
-bun add -d @effect/language-service
-```
+Keep type safety settings from the consuming repository. Read this repository's validation configuration for the compiler options used to check its examples; copying those options is not a prerequisite for Effect.
 
-Add to `tsconfig.json`:
+## Optional Effect language service
 
-```json
-{
-  "$schema": "https://raw.githubusercontent.com/Effect-TS/language-service/refs/heads/main/schema.json",
-  "compilerOptions": {
-    "plugins": [{ "name": "@effect/language-service" }]
-  }
-}
-```
+The [Effect language service](https://github.com/Effect-TS/language-service) adds Effect-specific editor diagnostics. Verify its release supports the consuming Effect and TypeScript versions before adding it. It is outside this skill's validated dependency set.
 
-The `$schema` field enables autocomplete and validation for plugin options.
-
-### Editor Setup
-
-Your editor must use the **workspace** TypeScript version.
-
-**VS Code / Cursor:**
-
-```json
-// .vscode/settings.json
-{
-  "typescript.tsdk": "./node_modules/typescript/lib",
-  "typescript.enablePromptUseWorkspaceTsdk": true
-}
-```
-
-Then F1, "TypeScript: Select TypeScript version", "Use workspace version".
-
-**JetBrains:** Settings, Languages & Frameworks, TypeScript, select workspace version.
-
-### Build-Time Diagnostics
-
-Patch TypeScript for CI enforcement:
-
-```bash
-bunx effect-language-service patch
-```
-
-Persist across installs:
-
-```json
-{
-  "scripts": { "prepare": "effect-language-service patch" }
-}
-```
-
-## TypeScript Configuration
-
-### Key Settings
-
-```jsonc
-{
-  "compilerOptions": {
-    // Build performance
-    "incremental": true,
-    "composite": true,
-
-    // Module system
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleDetection": "force",
-
-    // Import handling
-    "verbatimModuleSyntax": true,
-    "rewriteRelativeImportExtensions": true,
-
-    // Type safety
-    "strict": true,
-    "exactOptionalPropertyTypes": true,
-    "noUnusedLocals": true,
-    "noImplicitOverride": true,
-
-    // Development
-    "declarationMap": true,
-    "sourceMap": true,
-    "skipLibCheck": true,
-
-    // Effect
-    "plugins": [{ "name": "@effect/language-service" }]
-  }
-}
-```
-
-### Why These Settings
-
-- **incremental + composite**: Fast rebuilds, monorepo project references
-- **ES2022 + NodeNext**: Modern JS, proper ESM/CJS resolution
-- **verbatimModuleSyntax**: Preserves `import type` exactly
-- **rewriteRelativeImportExtensions**: Allows `.ts` in imports
-- **strict + exactOptionalPropertyTypes**: Maximum type safety
-- **skipLibCheck**: Faster builds (skip node_modules checking)
-
-## Module Settings by Project Type
-
-### Bundled Apps (Vite, Webpack, esbuild)
-
-```jsonc
-{
-  "compilerOptions": {
-    "module": "preserve",
-    "moduleResolution": "bundler",
-    "noEmit": true
-  }
-}
-```
-
-TypeScript acts as type-checker only. Bundler handles module transformation.
-
-### Libraries and Node.js Apps
-
-```jsonc
-{
-  "compilerOptions": {
-    "module": "NodeNext"
-  }
-}
-```
-
-Required for npm packages, Node.js apps, and CLI tools. Enforces Node.js module resolution rules.
-
-Additional library settings:
-
-```jsonc
-{
-  "compilerOptions": {
-    "declaration": true,
-    "composite": true,
-    "declarationMap": true
-  }
-}
-```
-
-**Rule of thumb:** Build tool compiling your code? Use `preserve` + `bundler`. TypeScript compiling your code? Use `NodeNext`.
-
-## Source and validation workflow
-
-Follow [version and source lookup](version-compatibility.md) before choosing dependencies or consulting an Effect checkout. Read the consuming package's scripts for its typecheck and test commands.
-
-The examples in this skill compile with TypeScript 5.9.3 and strict type checking. For NodeNext ESM, set `"type": "module"` in the owning package and follow Node's relative import extension rules. For bundled code, use the bundler's module settings.
-
-The language service is optional and is not included in this slice's compatibility guarantee. Verify its installed release supports the consuming Effect and TypeScript versions before installing or patching TypeScript. The configuration and patch commands above describe integration points, not a validated plugin version.
+Use the installed language service's documentation for plugin options, editor integration, and any build-time patching. Editor diagnostics and compiler enforcement are separate integration choices. Add build-time enforcement only when the project wants that policy, and preserve existing install lifecycle scripts.
